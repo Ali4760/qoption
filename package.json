@@ -1,0 +1,17 @@
+{
+  "name": "qoption-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "build:local": "vite build --mode emulator",
+    "check": "tsc --noEmit && npm --prefix functions run build",
+    "emulators": "npm run build:local && npm --prefix functions run build && firebase emulators:start --project demo-qoption --only auth,firestore,functions,hosting",
+    "seed": "npm --prefix functions run seed",
+    "test:integration": "node tests/emulator.mjs"
+  },
+  "dependencies": { "firebase": "^12.5.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "~5.9.3", "vite": "^7.2.0" }
+}

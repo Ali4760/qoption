@@ -15,23 +15,30 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - name: Install Firebase CLI
-        run: npm install --global firebase-tools@15.32.1
-      - name: Check Hosting entry point
-        run: test -s hosting/index.html
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: qoption-6c226
-          workload_identity_provider: projects/57839421954/locations/global/workloadIdentityPools/github-actions/providers/qoption-main
-          service_account: github-hosting-deploy@qoption-6c226.iam.gserviceaccount.com
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix functions
+      - name: Check and build
+        env:
+          VITE_FIREBASE_REGION: ${{ vars.VITE_FIREBASE_REGION }}
+          VITE_FIREBASE_APPCHECK_SITE_KEY: ${{ vars.VITE_FIREBASE_APPCHECK_SITE_KEY }}
+        run: |
+          npm run check
+          npm run build
       - name: Deploy Hosting
-        run: firebase deploy --only hosting --project qoption-6c226 --non-interactive
-      - name: Check the deployed page
-        run: curl --fail --silent --show-error --retry 5 --retry-all-errors https://qoption-6c226.web.app/ | grep -F '<title>Qoption deployment check</title>'
+        uses: FirebaseExtended/action-hosting-deploy@7c850a480ce753f4f06f010801fc5a43787740bb # v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_QOPTION_6C226 }}
+          projectId: qoption-6c226
+          channelId: live
+          firebaseToolsVersion: 15.32.1
+      - name: Check both entry points
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-all-errors https://qoption-6c226.web.app/ | grep -F 'Qoption'
+          curl --fail --silent --show-error --retry 5 --retry-all-errors https://qoption-6c226.web.app/admin/ | grep -F 'Admin panel'
