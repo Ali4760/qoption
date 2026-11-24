@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "site": "qoption-6c226",
+    "public": "hosting",
+    "ignore": [".*", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ]
+  }
+}

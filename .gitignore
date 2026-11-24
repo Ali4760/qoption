@@ -1,0 +1,9 @@
+/user/
+/Admin/
+.firebase/
+firebase-debug*.log
+node_modules/
+.env
+.env.*
+!.env.example
+gha-creds-*.json
