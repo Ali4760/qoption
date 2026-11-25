@@ -1,3 +1,12 @@
+@font-face {
+  font-family: "Syne";
+  src: url("../assets/syne-option-800.woff2?no-inline") format("woff2");
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  unicode-range: U+004F, U+0069, U+006E-0070, U+0074;
+}
+
 :root {
   color-scheme: dark;
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
@@ -18,6 +27,8 @@
   --link: #3aa0ff;
   --glow-blue: rgba(58, 160, 255, .12);
   --glow-mint: rgba(31, 214, 164, .08);
+  --public-page-fill: linear-gradient(160deg, #08101a, var(--bg) 52%, #0a131d);
+  --public-page-glow: radial-gradient(ellipse at 81% 5%, var(--glow-blue), transparent 54%), radial-gradient(ellipse at 17% 10%, var(--glow-mint), transparent 48%);
   --primary-fill: linear-gradient(135deg, #22e0ad, #14b889);
   --panel-fill: linear-gradient(150deg, var(--raised), var(--surface));
   --green: #1fd6a4;
@@ -46,8 +57,9 @@ p { line-height: 1.5; }
 .pos { color: var(--green); }
 .neg { color: var(--red); }
 .boot { padding: 2rem; color: var(--muted); }
-.brand { color: var(--text); display: flex; align-items: center; gap: 11px; font-size: 1.22rem; font-weight: 750; letter-spacing: -.045em; }
-.brand-logo { display: block; flex: none; width: 40px; height: 40px; padding: 3px; object-fit: contain; border-radius: 9px; background: #dce8f4; }
+.brand { color: #fff; display: flex; align-items: center; gap: 11px; font-size: 1.22rem; }
+.brand-wordmark { font-family: "Syne", "Arial Black", system-ui, sans-serif; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+.brand-logo { display: block; flex: none; width: 40px; height: 40px; object-fit: contain; }
 .mobile-brand { display: none; }
 .shell { min-height: 100dvh; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
 .sidebar { display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); position: sticky; top: 0; height: 100dvh; padding: 24px 14px 17px; overflow-y: auto; z-index: 4; }
@@ -170,8 +182,8 @@ dialog dt { color: var(--muted); }
   .sidebar { position: fixed; left: 0; width: 215px; transform: translateX(-100%); visibility: hidden; }
   .sidebar.open { transform: none; visibility: visible; box-shadow: 12px 0 40px #0008; }
   .menu-toggle { display: inline-flex !important; }
-  .mobile-brand { display: inline-flex; }
-  .mobile-brand .brand-logo { width: 30px; height: 30px; padding: 2px; border-radius: 7px; }
+  .mobile-brand { display: inline-flex; gap: 7px; font-size: .875rem; }
+  .mobile-brand .brand-logo { width: 30px; height: 30px; }
   .topbar { gap: 8px; }
   .top-actions { margin-left: auto; }
   .topbar { min-height: 57px; }
@@ -180,6 +192,9 @@ dialog dt { color: var(--muted); }
   .auth-wrap, .two-panels { grid-template-columns: 1fr; }
   .auth-wrap { align-content: center; }
   .chart { height: 300px; }
+}
+@media (max-width: 440px) {
+  .mobile-brand .brand-wordmark { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
 

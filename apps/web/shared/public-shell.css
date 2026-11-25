@@ -1,7 +1,7 @@
 .home-page {
   --home-accent: var(--accent);
   --home-border: var(--border-strong);
-  background: linear-gradient(160deg, #08101a, var(--bg) 52%, #0a131d);
+  background: var(--public-page-fill);
   color: var(--text);
 }
 .home-skip { position: absolute; z-index: 5; top: 7px; left: 10px; transform: translateY(-160%); background: var(--raised); padding: 10px; }
@@ -9,6 +9,8 @@
 .home-container { width: min(100% - 48px, 1160px); margin-inline: auto; }
 .home-header { position: sticky; top: 0; z-index: 4; border-bottom: 1px solid var(--line); background: var(--sidebar); }
 .home-header-grid { position: relative; display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(208px, 1fr); align-items: center; gap: 16px; min-height: 67px; }
+:is(.home-header, .home-footer) .brand { gap: 9px; font-size: 1rem; }
+:is(.home-header, .home-footer) .brand-logo { width: 34px; height: 34px; }
 .home-nav { display: flex; align-items: center; gap: clamp(5px, 1.4vw, 17px); }
 .home-nav a, .home-footer a:not(.brand) { color: var(--muted); font-size: .88rem; }
 .home-nav a { padding: 7px 8px; white-space: nowrap; border-radius: 6px; }
@@ -60,8 +62,8 @@
   .home-header-actions > a { display: none; }
   .home-nav .home-menu-account { display: flex; color: var(--accent); }
   .home-footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-  .home-header .brand { gap: 7px; font-size: 1rem; }
-  .home-header .brand-logo { width: 34px; height: 34px; }
+  :is(.home-header, .home-footer) .brand { gap: 7px; font-size: .875rem; }
+  :is(.home-header, .home-footer) .brand-logo { width: 30px; height: 30px; }
 }
 
 @media (max-width: 380px) {

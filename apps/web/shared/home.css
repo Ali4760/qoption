@@ -1,4 +1,4 @@
-.home-hero { background: radial-gradient(ellipse at 81% 5%, var(--glow-blue), transparent 54%), radial-gradient(ellipse at 17% 10%, var(--glow-mint), transparent 48%); padding: 70px 0 0; }
+.home-hero { background: var(--public-page-glow); padding: 70px 0 0; }
 .home-hero-copy { max-width: 960px; margin: 0 auto 42px; text-align: center; }
 .home-hero h1 { font-size: clamp(2.3rem, 6vw, 4.55rem); line-height: 1.02; letter-spacing: -.062em; }
 .home-hero h1 span { color: var(--home-accent); }

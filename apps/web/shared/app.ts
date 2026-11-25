@@ -5,7 +5,7 @@ import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, on
 import { assets, findAsset, profitPercent, type Asset } from '../../../functions/src/market';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
-import { adminNav, brand, brandMark, chartFrames, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, walletForms } from './screens';
+import { adminNav, brand, brandContent, chartFrames, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, walletForms } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 
 const root = document.querySelector<HTMLElement>('#app')!;
@@ -136,7 +136,7 @@ function shell() {
     '</nav><div class="side-bottom"><p class="quiet">' + esc(admin ? 'Staff workspace' : home?.profile.name) + '</p><a href="' + (admin ? '/' : '/admin/') + '">' +
     (admin ? 'User site' : 'Staff sign-in') + '</a></div></aside><div class="work"><header class="topbar">' +
     '<button class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
-    '<span class="mobile-brand" role="img" aria-label="Qoption">' + brandMark + '</span><span class="top-title">' +
+    '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title">' +
     (admin ? 'Admin panel' : 'Trading terminal') + '</span><div class="top-actions">' +
     (admin ? '<span class="pill practice">Practice environment</span>' : '<a href="#wallet" class="top-balance"><span class="quiet">Practice Credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
     '<button class="button secondary compact" data-action="signout">Sign out</button></div></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
@@ -220,12 +220,19 @@ async function renderClient(run: number) {
 }
 async function renderAdmin(run: number) {
   if (route === 'overview') {
-    const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[] }>('admin.dashboard');
+    const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string }>('admin.dashboard');
     if (run === version) visibleRows = new Map([...values.recent, ...values.pending].map(row => [row.id, row]));
     const cards = [['clients', 'Assigned clients'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
+    const inviteCode = values.invitationCode || 'QOPTION2026';
+    const inviteCard = '<article class="metric" style="border-color: rgba(31, 214, 164, 0.3); background: rgba(31, 214, 164, 0.05);">' +
+      '<small style="color: #1fd6a4;">Client Invitation Code</small>' +
+      '<strong style="font-family: monospace; color: #1fd6a4; letter-spacing: 1px;">' + esc(inviteCode) + '</strong>' +
+      '<button class="button secondary compact" data-action="copy-invite" data-code="' + esc(inviteCode) + '">Copy code</button>' +
+      '</article>';
     return title('Admin dashboard', 'Monitor client accounts, trades, and funding requests.', 'Staff workspace') + '<div class="metrics">' +
       cards.map(([key, name]) => '<article class="metric"><small>' + name + '</small><strong>' + Number(values[key] || 0).toLocaleString() + '</strong>' +
-        (nav().some(item => item[0] === key) ? '<a href="#' + key + '">View ' + key + '</a>' : '') + '</article>').join('') + '</div>' +
+        (nav().some(item => item[0] === key) ? '<a href="#' + key + '">View ' + key + '</a>' : '') + '</article>').join('') +
+      inviteCard + '</div>' +
       section('Operations', '<div class="panel-body button-row">' + nav().filter(item => item[0] !== 'overview').map(([id,, name]) =>
         '<a class="button secondary" href="#' + id + '">' + name + '</a>').join('') + '</div>') + '<div class="overview-panels dashboard-lower">' +
       (role('finance') ? section('Pending funding', table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
@@ -241,7 +248,9 @@ async function renderAdmin(run: number) {
     return title('Clients', 'Browse accounts within your staff scope.') + section('Client directory',
       '<form class="filters" data-form="search"><label>Client name<input name="search" maxlength="50" value="' + esc(search) +
       '" placeholder="Search by name prefix"></label><button class="button secondary">Search</button></form>' +
-      table(['Client', 'Email', 'Trading', 'Withdrawals', ''], rows.map(row => [esc(row.name), esc(row.email), state(row.tradeEnabled ? 'enabled' : 'paused'),
+      table(['Client', 'Email', 'Invite Code', 'Trading', 'Withdrawals', ''], rows.map(row => [esc(row.name), esc(row.email),
+        '<span style="font-family: monospace; color: var(--iq-green, #1fd6a4);">' + esc(row.invitation_code || '—') + '</span>',
+        state(row.tradeEnabled ? 'enabled' : 'paused'),
         state(row.withdrawalEnabled ? 'enabled' : 'paused'), actionButton('client', row.id, 'Open')]), 'No clients found') + navigation());
   }
   const refresh = '<button class="button secondary" data-action="reload">Refresh</button>';
@@ -410,6 +419,12 @@ root.addEventListener('click', async event => {
         const email = root.querySelector<HTMLInputElement>('form[data-form=auth] input[name=email]')?.value;
         dialog('Reset password', '<form class="stack" data-form="reset"><label>Email address<input type="email" name="email" value="' +
           esc(email) + '" required></label><button class="button">Send reset link</button>' + formStatus() + '</form>');
+        break;
+      }
+      case 'copy-invite': {
+        const code = target.dataset.code || 'QOPTION2026';
+        await navigator.clipboard.writeText(code);
+        toast('Invitation code ' + code + ' copied to clipboard!');
         break;
       }
       case 'enroll': await enroll(); break;

@@ -16,8 +16,8 @@ const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
 export const pair = (value: unknown) => esc(String(value || '').replace(/USDT$/, '/USDT'));
 export const coin = (asset: Asset) => '<span class="coin" style="--coin:' + asset.color + '" aria-hidden="true">' + asset.code + '</span>';
 export const chartFrames = ['1m', '5m', '15m', '1h', '4h', '1d'];
-export const brandMark = '<img class="brand-logo" src="' + logoUrl + '" width="40" height="40" alt="">';
-export const brand = '<div class="brand">' + brandMark + '<span>Qoption</span></div>';
+export const brandContent = '<img class="brand-logo" src="' + logoUrl + '" width="40" height="40" alt=""><span class="brand-wordmark">Option</span>';
+export const brand = '<div class="brand" role="img" aria-label="Qoption">' + brandContent + '</div>';
 
 export function title(name: string, description: string, badge = '') {
   return '<div class="page-title"><div><h1>' + esc(name) + '</h1><p>' + esc(description) + '</p></div>' + (badge ? '<span class="pill practice">' + esc(badge) + '</span>' : '') + '</div>';

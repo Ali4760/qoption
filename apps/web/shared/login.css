@@ -2,7 +2,7 @@
   min-height: 100dvh;
   display: grid;
   grid-template-columns: minmax(390px, .88fr) minmax(0, 1.12fr);
-  background: var(--bg);
+  background: var(--public-page-glow), var(--public-page-fill);
   color: var(--text);
   --login-muted: var(--muted);
   --login-accent: var(--link);
@@ -16,7 +16,6 @@
 
 .login-access {
   justify-items: center;
-  background: var(--bg);
 }
 
 .login-card {
@@ -33,8 +32,6 @@
 .login-brand .brand-logo {
   width: 56px;
   height: 56px;
-  padding: 4px;
-  border-radius: 12px;
 }
 .login-heading { margin-bottom: 26px; }
 .login-heading h1 { font-size: clamp(2.1rem, 4vw, 3rem); letter-spacing: -.045em; }
@@ -114,7 +111,6 @@
 
 .login-market {
   border-left: 1px solid var(--line);
-  background: radial-gradient(ellipse at 66% 9%, var(--glow-blue), transparent 62%), radial-gradient(ellipse at 9% 53%, var(--glow-mint), transparent 60%), var(--sidebar);
   justify-items: center;
 }
 .login-market-content { width: min(100%, 600px); }

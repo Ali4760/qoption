@@ -25,7 +25,7 @@ export function userLogin({ registration, signedIn, remember, showQuickStart, no
     '<button class="button login-submit" type="submit">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>';
 
   const alternate = !signedIn ? '<p class="login-alternate">' + (registration ? 'Already have an account?' : 'New to Qoption?') +
-    ' <button type="button" class="login-link" data-action="registration">' + (registration ? 'Sign in' : 'Create an account') + '</button></p>' : '';
+    ' <a href="' + (registration ? '/' : '/register.html') + '" class="login-link">' + (registration ? 'Sign in' : 'Create an account') + '</a></p>' : '';
   const quickStartLink = showQuickStart && !signedIn
     ? '<button class="button secondary login-quick-start" data-action="quick-start" type="button">Open practice workspace</button>' : '';
 

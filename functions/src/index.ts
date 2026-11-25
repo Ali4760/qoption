@@ -65,12 +65,34 @@ function changeFunds(tx: Transaction, uid: string, current: DocumentData | undef
   tx.update(wallet(uid), { available, held });
 }
 
-async function upsertProfile(uid: string, email: string) {
+async function upsertProfile(uid: string, email: string, nameParam?: string, inviteCodeParam?: string) {
   await db.runTransaction(async tx => {
     const [user, balance] = await Promise.all([tx.get(profile(uid)), tx.get(wallet(uid))]);
+    const trimmedName = nameParam && nameParam.trim() ? nameParam.trim().slice(0, 60) : undefined;
+    const trimmedInvite = inviteCodeParam && inviteCodeParam.trim() ? inviteCodeParam.trim().slice(0, 40) : undefined;
     if (!user.exists) {
-      const name = email.split('@')[0]?.slice(0, 40) || 'Trader';
-      tx.create(profile(uid), { uid, email, name, nameSearch: name.toLowerCase(), createdAt: Date.now(), tradeEnabled: true, withdrawalEnabled: true, assignedTo: '' });
+      const name = trimmedName || email.split('@')[0]?.slice(0, 40) || 'Trader';
+      tx.create(profile(uid), {
+        uid,
+        email,
+        name,
+        nameSearch: name.toLowerCase(),
+        invitation_code: trimmedInvite || '',
+        createdAt: Date.now(),
+        tradeEnabled: true,
+        withdrawalEnabled: true,
+        assignedTo: ''
+      });
+    } else if (trimmedName || trimmedInvite) {
+      const updates: Record<string, unknown> = {};
+      if (trimmedName) {
+        updates.name = trimmedName;
+        updates.nameSearch = trimmedName.toLowerCase();
+      }
+      if (trimmedInvite) {
+        updates.invitation_code = trimmedInvite;
+      }
+      tx.update(profile(uid), updates);
     }
     if (!balance.exists) {
       tx.create(wallet(uid), { available: openingAmount, held: 0 });
@@ -281,8 +303,9 @@ async function staffQuery(user: Actor, collection: string) {
 }
 
 async function adminOverview(user: Actor) {
-  const [clients, trades, funding] = await Promise.all([
+  const [clients, trades, funding, staffProfile] = await Promise.all([
     staffQuery(user, 'profiles'), staffQuery(user, 'trades'), staffQuery(user, 'funding'),
+    profile(user.uid).get()
   ]);
   const [clientCount, tradeCount, deposits, withdrawals] = await Promise.all([
     clients.count().get(), trades.where('status', '==', 'open').count().get(),
@@ -293,9 +316,16 @@ async function adminOverview(user: Actor) {
     user.staff.includes('admin') ? trades.orderBy('createdAt', 'desc').limit(4).get() : null,
     user.staff.includes('finance') ? funding.where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(4).get() : null,
   ]);
-  return { clients: clientCount.data().count, trades: tradeCount.data().count, deposits: deposits.data().count, withdrawals: withdrawals.data().count,
+  const invitationCode = (staffProfile.data()?.invitation_code as string | undefined) || 'QOPTION2026';
+  return {
+    clients: clientCount.data().count,
+    trades: tradeCount.data().count,
+    deposits: deposits.data().count,
+    withdrawals: withdrawals.data().count,
+    invitationCode,
     recent: recent?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? [],
-    pending: pending?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? [] };
+    pending: pending?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? []
+  };
 }
 async function clientView(user: Actor, data: Data) {
   const uid = identifier(data.uid);
@@ -335,9 +365,12 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
   }
   switch (op) {
-    case 'access':
-      await upsertProfile(user.uid, request.auth?.token.email || '');
+    case 'access': {
+      const nameParam = typeof data.name === 'string' ? data.name : undefined;
+      const inviteCodeParam = typeof data.inviteCode === 'string' ? data.inviteCode : undefined;
+      await upsertProfile(user.uid, request.auth?.token.email || '', nameParam, inviteCodeParam);
       return home(user);
+    }
     case 'home': return home(user);
     case 'trade.place': return placeTrade(user, data);
     case 'funding.request': return askFunding(user, data);
