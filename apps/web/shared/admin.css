@@ -10,7 +10,7 @@
   --admin-orange: #f8c560;
   --admin-red: #ff8fa3;
   --admin-blue: #5ba4f5;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   background: radial-gradient(ellipse at 75% 0, #0f2238 0, transparent 42%), #060b12;
   font-family: "Workspace Outfit", "Segoe UI", system-ui, sans-serif;
 }
@@ -39,23 +39,28 @@
 .admin-shell .sidebar .brand-wordmark { font-size: 1.17rem; }
 
 .admin-shell .navigation {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
   gap: 6px;
   margin-top: 22px;
-  flex: 1;
 }
 
 .admin-shell .admin-nav-group {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 0;
 }
 
 .admin-shell .navigation a,
 .admin-shell .nav-logout-btn {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   width: 100%;
   min-height: 46px;
+  height: 46px;
   padding: 0 14px;
   gap: 13px;
   color: #8fa5be;
@@ -114,6 +119,10 @@
   font-size: .71rem;
   font-weight: 700;
   line-height: 1;
+}
+
+.admin-shell .nav-badge[hidden] {
+  display: none;
 }
 
 .admin-shell .side-bottom {

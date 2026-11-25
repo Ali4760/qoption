@@ -179,19 +179,19 @@ function shell() {
     '<div class="workspace-nav-group"><p class="workspace-nav-label">' + group.name + '</p>' +
     group.links.map(navigationLink).join('') + '</div>').join('');
   const name = home?.profile.name?.trim() || 'Account';
-  const profile = admin ? '<p class="quiet">Staff access</p><div class="admin-role-list">' +
-    roles.map(name => '<span>' + esc(label(name)) + '</span>').join('') + '</div><a href="/">Open user site</a>' :
-    '<div class="workspace-profile"><span class="workspace-avatar" id="workspace-avatar" aria-hidden="true">' +
-    esc([...name][0].toUpperCase()) + '</span><strong id="workspace-profile-name">' + esc(name) + '</strong></div><a href="/admin/">Staff sign-in</a>';
+  const profile = admin ? '' :
+    '<div class="side-bottom"><div class="workspace-profile"><span class="workspace-avatar" id="workspace-avatar" aria-hidden="true">' +
+    esc([...name][0].toUpperCase()) + '</span><strong id="workspace-profile-name">' + esc(name) + '</strong></div><a href="/admin/">Staff sign-in</a></div>';
   const dismissMenu = '<button type="button" class="workspace-menu-dismiss" data-action="dismiss-menu" tabindex="-1" aria-label="Close navigation"></button>';
+  const topActions = admin ? '' :
+    '<div class="top-actions"><a href="#wallet" class="top-balance" aria-label="Available credits: ' + credits(home?.wallet.available) + '"><span class="quiet">Available credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>' +
+    '<button type="button" class="button secondary compact" data-action="signout">Sign out</button></div>';
   root.innerHTML = '<div class="shell ' + (admin ? 'admin-shell' : 'user-shell') + '"><aside class="sidebar" id="sidebar">' + brand +
     '<nav class="navigation" aria-label="' + (admin ? 'Staff' : 'Workspace') + ' navigation">' + navigation +
-    '</nav><div class="side-bottom">' + profile + '</div></aside>' + dismissMenu + '<div class="work"><header class="topbar">' +
+    '</nav>' + profile + '</aside>' + dismissMenu + '<div class="work"><header class="topbar">' +
     '<button type="button" class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
     '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title" id="workspace-location">' +
-    (admin ? 'Admin dashboard' : 'Trade') + '</span><div class="top-actions">' +
-    (admin ? '<span class="pill practice">Virtual funds</span>' : '<a href="#wallet" class="top-balance" aria-label="Available credits: ' + credits(home?.wallet.available) + '"><span class="quiet">Available credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
-    '<button type="button" class="button secondary compact" data-action="signout">Sign out</button></div></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
+    (admin ? 'Admin dashboard' : 'Trade') + '</span>' + topActions + '</header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
 }
 async function start() {
   try {
