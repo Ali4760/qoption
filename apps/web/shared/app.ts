@@ -1266,7 +1266,7 @@ function details(action: string, row: Row) {
     bd.account_type, bd.branch_name, bd.branch_code, bd.institution_number,
   ].filter(Boolean).join('\n');
   const copyBtnHtml = bankDetails.length
-    ? `<button type="button" class="button secondary" style="margin-top:12px;width:100%;" onclick="navigator.clipboard.writeText(${JSON.stringify(copyLines)}).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>{this.textContent='Copy Bank Details'},1800)})">Copy Bank Details</button>`
+    ? `<button type="button" class="button secondary" style="margin-top:12px;width:100%;" data-action="copy-bank-details" data-copy="${esc(copyLines)}">Copy Bank Details</button>`
     : '';
   const adminInfo = definition([
     ['Reference', recordReference(row.id)],
@@ -1672,6 +1672,26 @@ root.addEventListener('click', async event => {
       case 'previous': if (list().page > 0) { list().page--; await render(); } break;
       case 'restrictions': case 'adjustment': clientAction(action, id); break;
       case 'trade-detail': case 'funding-detail': case 'review-funding': { const row = visibleRows.get(id); if (row) details(action, row); break; }
+      case 'copy-bank-details': {
+        const text = target.dataset.copy || '';
+        if (!text) break;
+        const done = () => {
+          target.textContent = '✓ Copied!';
+          setTimeout(() => { target.textContent = 'Copy Bank Details'; }, 1800);
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(() => {});
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); done(); } finally { ta.remove(); }
+        }
+        break;
+      }
       case 'approve-funding': {
         const clientName = target.dataset.name || id;
         const row = visibleRows.get(id);
