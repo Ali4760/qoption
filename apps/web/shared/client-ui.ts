@@ -302,6 +302,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
     </div>
 
+    <section id="notifBanners" class="notif-banner-stack" aria-label="Unread notifications" aria-live="polite"></section>
+
     <div class="mobile-overlay" id="mobileOverlay" data-action="client-menu-close"></div>
     <aside id="mobileSidebar" aria-label="Menu">
       <div class="mobile-sidebar-brand">
@@ -508,10 +510,6 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
     </div>
 
-    <!-- On-Screen Push Notification Popup (stays until Mark as Read) -->
-    <div id="notifPopup" class="replica-modal-backdrop notif-popup-backdrop" role="dialog" aria-modal="true" aria-label="Notification">
-      <div class="notif-popup-stack" id="notifPopupStack"></div>
-    </div>
   </div>`;
 }
 
@@ -973,10 +971,6 @@ export function isNotifUnread(n: Row, home: Home) {
   return Number(n.createdAt || 0) > readAt;
 }
 
-export function isPopupNotif(n: Row, home: Home) {
-  return isNotifUnread(n, home) && String(n.type || '').toUpperCase() !== 'TRADE';
-}
-
 export function renderNotificationsOverlayList(home: Home, state: ClientState) {
   if (!state.notifications.length) {
     return '<div style="padding:22px;text-align:center;color:var(--iq-muted);font-size:12px;font-weight:700;">No notifications</div>';
@@ -997,21 +991,20 @@ export function renderNotificationsOverlayList(home: Home, state: ClientState) {
   }).join('');
 }
 
-export function renderNotifPopupHtml(home: Home, state: ClientState) {
-  const pending = state.notifications.filter(n => isPopupNotif(n, home));
-  if (!pending.length) return '';
+export function renderNotifBannersHtml(home: Home, state: ClientState) {
+  const pending = state.notifications.filter(n => isNotifUnread(n, home) && String(n.type || '').toUpperCase() !== 'TRADE');
   return pending.map(n => `
-    <div class="notif-popup-card">
-      <div class="notif-popup-head">
-        <div class="notif-popup-badge-wrap">
-          <span class="notif-popup-icon">${clientIcons.bell}</span>
-          <span class="notif-popup-kicker">Notification</span>
+    <div class="notif-banner-card">
+      <div class="notif-banner-head">
+        <div class="notif-banner-label">
+          <span class="notif-banner-icon" aria-hidden="true">${clientIcons.bell}</span>
+          <span>Notification</span>
         </div>
-        <span class="notif-popup-time">${esc(dateTime(n.createdAt))}</span>
+        <span class="notif-banner-time">${esc(dateTime(n.createdAt))}</span>
       </div>
-      <div class="notif-popup-title">${esc(n.title || 'Notification')}</div>
-      <div class="notif-popup-body">${esc(n.message || '')}</div>
-      <button type="button" class="replica-primary-btn notif-popup-btn" data-action="client-mark-notif-read" data-id="${esc(n.id)}">Mark as Read</button>
+      <div class="notif-banner-title">${esc(n.title || 'Notification')}</div>
+      <div class="notif-banner-body">${esc(n.message || '')}</div>
+      <button type="button" class="replica-primary-btn notif-banner-btn" data-action="client-mark-notif-read" data-id="${esc(n.id)}">Mark as Read</button>
     </div>
   `).join('');
 }

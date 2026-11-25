@@ -82,6 +82,11 @@ function changeFunds(tx: Transaction, uid: string, current: DocumentData | undef
 }
 
 async function upsertProfile(uid: string, email: string, nameParam?: string, inviteCodeParam?: string) {
+  // Block staff members from creating/using a client profile — they must use the admin panel only.
+  const staffDoc = await db.collection('staff').doc(uid).get();
+  if (staffDoc.exists && staffDoc.get('active') === true) {
+    fail('permission-denied', 'Staff accounts cannot access the client workspace. Use the admin panel.');
+  }
   let created = false;
   await db.runTransaction(async tx => {
     const [user, balance] = await Promise.all([tx.get(profile(uid)), tx.get(wallet(uid))]);
@@ -849,7 +854,18 @@ async function enrichAuditRows(rows: Data[]) {
 export const workspace = onCall({ region, enforceAppCheck: local ? false : requireAppCheck, maxInstances: 8 }, async request => {
   const data = record(request.data);
   const op = text(data.op, 64);
-  const user = await actor(request, op.startsWith('admin.'));
+  const isAdminOp = op.startsWith('admin.');
+  const user = await actor(request, isAdminOp);
+
+  // For client ops, verify the caller is NOT a staff member (belt + suspenders check in addition to upsertProfile guard).
+  // This prevents a staff account from using the client API even if they already have a stale profile document.
+  if (!isAdminOp && op !== 'admin.access') {
+    const staffDoc = await db.collection('staff').doc(user.uid).get();
+    if (staffDoc.exists && staffDoc.get('active') === true) {
+      fail('permission-denied', 'Staff accounts cannot access the client workspace. Use the admin panel.');
+    }
+  }
+
   const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete', 'admin.invite.refresh'].includes(op);
   if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
@@ -916,12 +932,18 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       const rawSearch = text(data.search ?? '', 80, 0).trim();
       const search = rawSearch.replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
       const query = await staffQuery(user, 'profiles');
+
+      // Load all active staff UIDs so we can exclude them from the client list.
+      const staffSnap = await db.collection('staff').where('active', '==', true).get();
+      const staffUids = new Set(staffSnap.docs.map(d => d.id));
+
       let result: { rows: Data[]; cursor: string | null };
       if (search) {
         const snap = await query.orderBy('createdAt', 'desc').limit(500).get();
         const matched = snap.docs
           .map(doc => ({ ...doc.data(), id: doc.id }))
           .filter((row: Data) => {
+            if (staffUids.has(String(row.id || ''))) return false; // exclude staff
             const uid = String(row.id || '').toLowerCase();
             const name = String(row.name || '').toLowerCase();
             const email = String(row.email || '').toLowerCase();
@@ -930,7 +952,9 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
           .slice(0, 25);
         result = { rows: matched, cursor: null };
       } else {
-        result = await page(query, data, [op, user.uid, ''], 'createdAt', false);
+        const rawResult = await page(query, data, [op, user.uid, ''], 'createdAt', false);
+        rawResult.rows = rawResult.rows.filter((row: Data) => !staffUids.has(String(row.id || '')));
+        result = rawResult;
       }
       // Enrich with wallet balances
       const uids = result.rows.map(r => String(r.id));

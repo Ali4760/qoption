@@ -14,7 +14,7 @@ import { actionButton, amountField, credits, dateTime, errorMessage, esc, formSt
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
   clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, fileToCompressedDataUrl, filterTrades, filterTransactions,
-  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, isPopupNotif, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotifPopupHtml,
+  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotifBannersHtml,
   renderNotificationsOverlayList, renderOrderBookHtml, renderTxnDetailHtml, validateBankDetails, type ClientState,
 } from './client-ui';
 
@@ -322,13 +322,8 @@ function renderClientNotificationsUi() {
   }
   const listEl = root.querySelector<HTMLElement>('#notifList');
   if (listEl) listEl.innerHTML = renderNotificationsOverlayList(home, clientState);
-  const popup = root.querySelector<HTMLElement>('#notifPopup');
-  const popupStack = root.querySelector<HTMLElement>('#notifPopupStack');
-  if (popup && popupStack) {
-    const popupNotifs = clientState.notifications.filter(n => isPopupNotif(n, home!));
-    popupStack.innerHTML = renderNotifPopupHtml(home, clientState);
-    popup.classList.toggle('open', popupNotifs.length > 0);
-  }
+  const banners = root.querySelector<HTMLElement>('#notifBanners');
+  if (banners) banners.innerHTML = renderNotifBannersHtml(home, clientState);
 }
 
 function renderClientMessagesUi() {
