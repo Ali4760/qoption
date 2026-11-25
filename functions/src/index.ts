@@ -454,6 +454,57 @@ async function adminClientCreate(user: Actor, data: Data) {
   return { uid: created.uid };
 }
 
+async function adminNotificationsList(user: Actor, data: Data) {
+  if (!user.staff.includes('admin') && !user.staff.includes('support')) {
+    fail('permission-denied', 'Your staff role cannot perform this action.');
+  }
+  const uid = identifier(data.uid);
+  checkScope(user, (await profile(uid).get()).data());
+  const snap = await db.collection('notifications').where('uid', '==', uid).limit(50).get();
+  const rows = snap.docs
+    .map(doc => ({ ...doc.data(), id: doc.id }))
+    .sort((a: Data, b: Data) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  return { rows };
+}
+
+async function adminNotificationPush(user: Actor, data: Data) {
+  if (!user.staff.includes('admin') && !user.staff.includes('support')) {
+    fail('permission-denied', 'Your staff role cannot perform this action.');
+  }
+  const uid = identifier(data.uid);
+  const title = text(data.title, 100, 1);
+  const message = text(data.message, 1000, 1);
+  const role = user.staff.includes('admin') ? 'admin' : 'support';
+  return mutate(user, data, 'admin.notifications.push', [uid, title, message], async tx => {
+    await checkStaff(tx, user, role);
+    checkScope(user, (await tx.get(profile(uid))).data());
+    const ref = db.collection('notifications').doc();
+    const now = Date.now();
+    tx.create(ref, { uid, title, message, createdAt: now, createdBy: user.uid });
+    audit(tx, user, uid, 'Notification pushed', title, now);
+    return { id: ref.id };
+  });
+}
+
+async function adminNotificationDelete(user: Actor, data: Data) {
+  if (!user.staff.includes('admin') && !user.staff.includes('support')) {
+    fail('permission-denied', 'Your staff role cannot perform this action.');
+  }
+  const id = identifier(data.id);
+  const role = user.staff.includes('admin') ? 'admin' : 'support';
+  return mutate(user, data, 'admin.notifications.delete', [id], async tx => {
+    await checkStaff(tx, user, role);
+    const ref = db.collection('notifications').doc(id);
+    const doc = await tx.get(ref);
+    if (!doc.exists) fail('not-found', 'Notification not found.');
+    const targetUid = String(doc.get('uid') || '');
+    checkScope(user, (await tx.get(profile(targetUid))).data());
+    tx.delete(ref);
+    audit(tx, user, targetUid, 'Notification removed', String(doc.get('title') || id), Date.now());
+    return { id, deleted: true };
+  });
+}
+
 async function enrichWithProfiles(rows: Data[], db: ReturnType<typeof getFirestore>) {
   const uids = [...new Set(rows.map(r => String(r.uid || '')).filter(Boolean))];
   if (!uids.length) return rows;
@@ -476,7 +527,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
   const data = record(request.data);
   const op = text(data.op, 64);
   const user = await actor(request, op.startsWith('admin.'));
-  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create'].includes(op);
+  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete'].includes(op);
   if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
   }
@@ -501,17 +552,39 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     case 'message.send': return message(user, data, false);
     case 'list': {
       const list = text(data.list, 20);
-      if (!['trades', 'funding', 'ledger', 'messages'].includes(list)) fail('invalid-argument', 'Invalid list.');
+      if (!['trades', 'funding', 'ledger', 'messages', 'notifications'].includes(list)) fail('invalid-argument', 'Invalid list.');
       if (list === 'trades' || list === 'ledger') await settleDue(user.uid);
+      if (list === 'notifications') {
+        const snap = await db.collection('notifications').where('uid', '==', user.uid).limit(50).get();
+        const rows = snap.docs
+          .map(doc => ({ ...doc.data(), id: doc.id }))
+          .sort((a: Data, b: Data) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        return { rows, cursor: null };
+      }
       return page(own(list, user.uid), data, [list, user.uid]);
     }
     case 'admin.access': return { roles: user.staff };
     case 'admin.dashboard': return adminOverview(user);
     case 'admin.clients': {
-      const search = text(data.search ?? '', 50, 0).toLowerCase();
-      let query = await staffQuery(user, 'profiles');
-      if (search) query = query.where('nameSearch', '>=', search).where('nameSearch', '<=', search + '\uF8FF');
-      const result = await page(query, data, [op, user.uid, search], search ? 'nameSearch' : 'createdAt', !!search);
+      const rawSearch = text(data.search ?? '', 80, 0).trim();
+      const search = rawSearch.replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
+      const query = await staffQuery(user, 'profiles');
+      let result: { rows: Data[]; cursor: string | null };
+      if (search) {
+        const snap = await query.orderBy('createdAt', 'desc').limit(500).get();
+        const matched = snap.docs
+          .map(doc => ({ ...doc.data(), id: doc.id }))
+          .filter((row: Data) => {
+            const uid = String(row.id || '').toLowerCase();
+            const name = String(row.name || '').toLowerCase();
+            const email = String(row.email || '').toLowerCase();
+            return uid.includes(search) || name.includes(search) || email.includes(search);
+          })
+          .slice(0, 25);
+        result = { rows: matched, cursor: null };
+      } else {
+        result = await page(query, data, [op, user.uid, ''], 'createdAt', false);
+      }
       // Enrich with wallet balances
       const uids = result.rows.map(r => String(r.id));
       const walletDocs = await Promise.all(uids.map(uid => wallet(uid).get()));
@@ -547,6 +620,9 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     }
     case 'admin.client.create': return adminClientCreate(user, data);
     case 'admin.client.update': return adminClientUpdate(user, data);
+    case 'admin.notifications.list': return adminNotificationsList(user, data);
+    case 'admin.notifications.push': return adminNotificationPush(user, data);
+    case 'admin.notifications.delete': return adminNotificationDelete(user, data);
     case 'admin.funding.decide': return decideFunding(user, data, true);
     case 'admin.client.restrict': return adminUpdate(user, data, false);
     case 'admin.client.adjust': return adminUpdate(user, data, true);

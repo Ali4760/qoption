@@ -8,7 +8,7 @@ import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, on
 import { assets, findAsset, profitPercent, type Asset } from '../../../functions/src/market';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
-import { adminNav, adminNavGroups, brand, brandContent, chartFrames, chartModes, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, userNavGroups, walletForms } from './screens';
+import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, brandContent, chartFrames, chartModes, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, userNavGroups, walletForms } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 
 const root = document.querySelector<HTMLElement>('#app')!;
@@ -142,14 +142,39 @@ function authNotice(message: string) {
   if (node) node.textContent = message;
 }
 function navigationLink([id, icon, name]: string[]) {
-  return '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span>' + name + '</a>';
+  const badge = admin && (id === 'withdrawals' || id === 'deposits')
+    ? '<span class="nav-badge" id="nav-badge-' + id + '" hidden>0</span>' : '';
+  return '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span><span class="nav-text">' + name + '</span>' + badge + '</a>';
+}
+
+function setAdminBadges(deposits: unknown, withdrawals: unknown) {
+  for (const [key, count] of [['deposits', Number(deposits || 0)], ['withdrawals', Number(withdrawals || 0)]] as const) {
+    const el = root.querySelector<HTMLElement>('#nav-badge-' + key);
+    if (!el) continue;
+    if (count > 0) {
+      el.textContent = String(count);
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+}
+
+async function refreshAdminBadges() {
+  if (!admin || !access) return;
+  try {
+    const data = await api.call<{ deposits?: number; withdrawals?: number }>('admin.dashboard');
+    setAdminBadges(data.deposits, data.withdrawals);
+  } catch { /* Non-fatal badge refresh. */ }
 }
 
 function shell() {
   const navigation = admin ? adminNavGroups.map(group => {
     const links = group.links.filter(item => !item[3] || role(item[3]));
-    return links.length ? '<div class="admin-nav-group"><p class="admin-nav-label">' + group.name + '</p>' +
-      links.map(navigationLink).join('') + '</div>' : '';
+    return links.length ? '<div class="admin-nav-group">' +
+      links.map(navigationLink).join('') +
+      '<button type="button" class="nav-logout-btn" data-action="signout"><span class="nav-symbol" aria-hidden="true">' + adminLogoutIcon + '</span><span class="nav-text">Logout</span></button>' +
+      '</div>' : '';
   }).join('') : userNavGroups.map(group =>
     '<div class="workspace-nav-group"><p class="workspace-nav-label">' + group.name + '</p>' +
     group.links.map(navigationLink).join('') + '</div>').join('');
@@ -187,7 +212,7 @@ async function start() {
           if (latest !== authVersion) return;
           setHome(data);
         }
-        access = true; shell(); await render();
+        access = true; shell(); if (admin) void refreshAdminBadges(); await render();
       } catch (error) { if (latest === authVersion) showAuth(errorMessage(error)); }
     });
   } catch (error) { root.innerHTML = '<main class="content">' + title('Workspace unavailable', errorMessage(error)) + '</main>'; }
@@ -213,15 +238,26 @@ async function renderUser(run: number) {
     return title('Trade history', 'Review open and settled simulated trades.') + section('Trades', tradeRows(rows) + navigation());
   }
   if (route === 'notifications') {
-    const rows = await getPage(run, 'list', { list: 'ledger' });
+    const [notifRes, rows] = await Promise.all([
+      api.call<Page>('list', { list: 'notifications' }),
+      getPage(run, 'list', { list: 'ledger' }),
+    ]);
     const readAt = home.profile.notificationReadAt ?? 0;
     const controls = '<div class="filters"><form data-form="notifications.read"><button class="button secondary">Mark all as read</button>' + formStatus() + '</form></div>';
+    const pushed = table(['Notice', 'Message', 'Date', 'Status'], notifRes.rows.map(row => [
+      '<strong>' + esc(row.title) + '</strong>',
+      esc(row.message),
+      dateTime(row.createdAt),
+      state(Number(row.createdAt) > readAt ? 'new' : 'read'),
+    ]), 'No pushed notifications');
     const activity = table(['Update', 'Available change', 'Date', 'Status'], rows.map(row => [
       '<strong>' + esc(label(row.kind)) + '</strong>' + (row.note ? '<div class="quiet" style="font-size:.8rem;margin-top:2px">' + esc(row.note) + '</div>' : ''),
       credits(row.availableDelta), dateTime(row.createdAt),
       state(Number(row.createdAt) > readAt ? 'new' : 'read'),
     ]), 'No updates yet');
-    return title('Notifications', 'Trade results and wallet updates.') + section('Account activity', controls + activity + navigation());
+    return title('Notifications', 'Admin notices, trade results and wallet updates.') +
+      section('Notifications', controls + pushed) +
+      '<div class="dashboard-lower">' + section('Account activity', activity + navigation()) + '</div>';
   }
   if (route === 'messages') {
     const rows = await getPage(run, 'list', { list: 'messages' });
@@ -268,6 +304,7 @@ async function renderClient(run: number) {
 async function renderAdmin(run: number) {
   if (route === 'overview') {
     const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string }>('admin.dashboard');
+    setAdminBadges(values.deposits, values.withdrawals);
     if (run === version) visibleRows = new Map([...values.recent, ...values.pending].map(row => [row.id, row]));
     const cards = [['clients', 'Clients in your scope'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
     const inviteCode = values.invitationCode || 'QOPTION2026';
@@ -310,10 +347,11 @@ async function renderAdmin(run: number) {
         const isFrozen = row.frozen === true;
         const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
         const uid = String(row.id || '');
-        const shortUid = uid.slice(0, 8);
+        const shortUid = uid.slice(0, 8).toUpperCase();
         const displayId = '#' + (startId - i);
-        const vip = String(row.vipLevel || 'VIP1');
-        const vipUnverified = vip.toLowerCase() === 'unverified';
+        const vipRaw = String(row.vipLevel || 'VIP1');
+        const vipUnverified = vipRaw.toLowerCase() === 'unverified';
+        const vipLabel = vipUnverified ? 'UNVERIFIED' : vipRaw.toUpperCase().replace(/^VIP(\d)$/i, 'VIP $1');
         const rep = Number(row.reputationScore ?? 100);
         const balance = Number(row.balance ?? 0);
         const mode = String(row.tradeMode || 'auto').toLowerCase();
@@ -325,7 +363,7 @@ async function renderAdmin(run: number) {
             '<div class="client-uid">UID: ' + esc(shortUid) + '</div>' +
           '</td>' +
           '<td class="vip-rep-cell">' +
-            '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vip.toUpperCase()) + '</span>' +
+            '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vipLabel) + '</span>' +
             '<div class="rep-score">Rep: ' + rep + '</div>' +
           '</td>' +
           '<td class="balance-cell">₹' + credits(balance) + '</td>' +
@@ -336,10 +374,10 @@ async function renderAdmin(run: number) {
             '<button type="button" class="trade-pill trade-loss' + (mode === 'loss' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="loss">Loss</button>' +
           '</div></td>' +
           '<td class="actions-cell">' +
-            '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">◧</button>' +
-            '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">▣</button>' +
-            '<button type="button" class="icon-action-btn" data-action="client-messages-modal" data-id="' + esc(uid) + '" title="Messages">▤</button>' +
-            '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">✎</button>' +
+            '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">' + adminActionIcons.report + '</button>' +
+            '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">' + adminActionIcons.wallet + '</button>' +
+            '<button type="button" class="icon-action-btn" data-action="notify-client" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Push notification">' + adminActionIcons.bell + '</button>' +
+            '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">' + adminActionIcons.edit + '</button>' +
           '</td>' +
         '</tr>';
       }).join('') +
@@ -563,6 +601,33 @@ window.matchMedia('(max-width: 680px)').addEventListener('change', event => {
   if (!event.matches) dismissNavigation();
 });
 
+async function loadClientNotifications(uid: string) {
+  const container = panel().querySelector<HTMLElement>('#client-notifications-list');
+  if (!container) return;
+  container.innerHTML = '<p class="quiet" style="margin:8px 0">Loading notification records…</p>';
+  try {
+    const res = await api.call<{ rows: Row[] }>('admin.notifications.list', { uid });
+    if (!res.rows.length) {
+      container.innerHTML = '<p class="quiet" style="margin:8px 0">No notifications pushed to this client yet.</p>';
+      return;
+    }
+    container.innerHTML = res.rows.map(item =>
+      '<div class="notif-record-card">' +
+      '<div class="notif-record-copy">' +
+      '<strong>' + esc(item.title) + '</strong>' +
+      '<p>' + esc(item.message) + '</p>' +
+      '<small>' + dateTime(item.createdAt) + '</small>' +
+      '</div>' +
+      '<button type="button" class="icon-action-btn reject-btn notif-delete-btn" data-action="delete-notification" data-id="' + esc(item.id) + '" data-uid="' + esc(uid) + '" title="Remove notification">' + adminActionIcons.trash + '</button>' +
+      '</div>'
+    ).join('');
+  } catch (error) {
+    container.innerHTML = '<p class="error">' + esc(errorMessage(error)) + '</p>';
+  }
+}
+
+let searchDebounceTimer = 0;
+
 root.addEventListener('keydown', event => {
   if (event.key === 'Escape' && root.querySelector('.sidebar.open') && !panel().open) dismissNavigation(true);
 });
@@ -760,6 +825,33 @@ root.addEventListener('click', async event => {
         toast('Trade mode set to ' + mode.toUpperCase() + '.');
         break;
       }
+      case 'notify-client': {
+        const clientName = target.dataset.name || 'Client';
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Push Notification: ' + esc(clientName) + '</h2>' +
+          '<form class="stack" data-form="admin.notifications.push">' +
+          '<input type="hidden" name="uid" value="' + esc(id) + '">' +
+          '<label>NOTIFICATION TITLE<input name="title" minlength="1" maxlength="100" placeholder="Enter alert or notice title" required></label>' +
+          '<label>MESSAGE<textarea name="message" minlength="1" maxlength="1000" placeholder="Write the notification message for the client..." style="min-height:85px" required></textarea></label>' +
+          '<div class="button-row" style="justify-content:flex-end">' +
+          '<button type="button" class="button secondary compact" data-action="close">Close</button>' +
+          '<button class="button">Push Notification</button></div>' +
+          formStatus() + '</form>' +
+          '<div class="notif-records-section">' +
+          '<h3>Sent Notification Records</h3>' +
+          '<div id="client-notifications-list" class="notif-records-list"></div>' +
+          '</div>';
+        if (!box.open) box.showModal();
+        void loadClientNotifications(id);
+        break;
+      }
+      case 'delete-notification': {
+        const uid = target.dataset.uid || '';
+        await api.call('admin.notifications.delete', { id, uid, requestId: crypto.randomUUID() });
+        toast('Notification removed.');
+        if (uid) void loadClientNotifications(uid);
+        break;
+      }
       case 'client-messages-modal': clientSection = 'messages'; go('client/' + encodeURIComponent(id)); break;
       case 'new-client': {
         const box = panel();
@@ -809,8 +901,23 @@ root.addEventListener('change', event => {
   if (node.id === 'funding-status') { list().status = node.value; resetList(); void render(); }
 });
 root.addEventListener('input', event => {
-  const form = (event.target as Element).closest<HTMLFormElement>('form');
+  const target = event.target as HTMLElement;
+  const form = target.closest<HTMLFormElement>('form');
   if (form) delete form.dataset.operationId;
+  if (target instanceof HTMLInputElement && target.classList.contains('clients-search-input')) {
+    window.clearTimeout(searchDebounceTimer);
+    const val = target.value;
+    searchDebounceTimer = window.setTimeout(async () => {
+      list().search = val;
+      resetList();
+      await render();
+      const input = root.querySelector<HTMLInputElement>('.clients-search-input');
+      if (input) {
+        input.focus();
+        input.setSelectionRange(val.length, val.length);
+      }
+    }, 380);
+  }
 });
 function confirmTrade(values: Record<string, FormDataEntryValue>, direction: string) {
   const stake = cents(values.amount), expiry = Number(values.duration);
@@ -869,7 +976,7 @@ root.addEventListener('submit', async event => {
   const started = version;
   try {
     if (await accountForm(op, values, form)) return;
-    if (op === 'search') { list().search = String(values.search || ''); resetList(); await render(); return; }
+    if (op === 'search') { window.clearTimeout(searchDebounceTimer); list().search = String(values.search || ''); resetList(); await render(); return; }
     const params: Record<string, unknown> = { ...values, requestId: form.dataset.operationId ||= crypto.randomUUID() };
     if ('amount' in params) params.amount = cents(params.amount) * Number(values.adjSign || 1);
     delete params.adjSign;
@@ -889,10 +996,21 @@ root.addEventListener('submit', async event => {
     }
     await api.call(op, params);
     if (started !== version) return;
-    panel().close(); delete form.dataset.operationId;
+    delete form.dataset.operationId;
+    if (op === 'admin.notifications.push') {
+      form.reset();
+      showFormStatus(form, 'Notification sent.');
+      toast('Notification pushed to client.');
+      void loadClientNotifications(String(values.uid || ''));
+      return;
+    }
+    panel().close();
     if (!admin) { const updated = await api.call<Home>('home'); if (started === version) setHome(updated); }
     if (started !== version) return;
-    if (op === 'admin.funding.decide' && route !== 'overview') resetList();
+    if (op === 'admin.funding.decide') {
+      if (route !== 'overview') resetList();
+      void refreshAdminBadges();
+    }
     await render();
     toast(op === 'trade.place' ? 'Simulated trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
   } catch (error) { showFormStatus(form, errorMessage(error)); }

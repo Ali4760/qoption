@@ -39,56 +39,81 @@
 .admin-shell .sidebar .brand-wordmark { font-size: 1.17rem; }
 
 .admin-shell .navigation {
-  gap: 0;
-  margin-top: 20px;
+  gap: 6px;
+  margin-top: 22px;
   flex: 1;
 }
 
 .admin-shell .admin-nav-group {
   display: grid;
-  gap: 2px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.admin-shell .admin-nav-label {
-  margin: 0 0 6px 11px;
-  color: #667f97;
-  font-size: .68rem;
-  font-weight: 700;
-  letter-spacing: .11em;
-  text-transform: uppercase;
+.admin-shell .navigation a,
+.admin-shell .nav-logout-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  gap: 13px;
+  color: #8fa5be;
+  font-size: .95rem;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, border-color .16s ease;
 }
 
-.admin-shell .navigation a {
-  min-height: 40px;
-  padding-inline: 11px;
-  gap: 10px;
-  color: var(--admin-muted);
-  font-size: .90rem;
-  border-radius: 7px;
-}
-
-.admin-shell .navigation a:hover {
+.admin-shell .navigation a:hover,
+.admin-shell .nav-logout-btn:hover {
   background: rgba(148, 178, 208, .07);
-  color: #cce0f4;
+  color: #dceafb;
 }
 
 .admin-shell .navigation a[aria-current="page"] {
-  border-color: var(--admin-green-border);
-  background: var(--admin-green-tint);
+  border-color: rgba(31, 214, 164, .18);
+  border-left: 3px solid var(--admin-green);
+  background: linear-gradient(90deg, rgba(31, 214, 164, .12), rgba(31, 214, 164, .04));
   color: var(--admin-green);
 }
 
 .admin-shell .nav-symbol {
-  color: #7ba8cc;
-  font-size: 1.08rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #8fa5be;
   width: 20px;
-  text-align: center;
+  height: 20px;
   flex-shrink: 0;
 }
 
 .admin-shell .navigation a[aria-current="page"] .nav-symbol {
   color: var(--admin-green);
+}
+
+.admin-shell .nav-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-shell .nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #ff3b5c;
+  color: #fff;
+  font-size: .71rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .admin-shell .side-bottom {
@@ -977,22 +1002,81 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-right: 5px;
-  border-radius: 7px;
-  border: 1px solid #263b52;
-  background: #101e2e;
-  color: #b8cfe5;
+  width: 34px;
+  height: 34px;
+  margin-right: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 178, 208, .18);
+  background: #0e1826;
+  color: #d3e2f0;
   font-size: .92rem;
   cursor: pointer;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.admin-shell .icon-action-btn svg {
+  display: block;
 }
 
 .admin-shell .icon-action-btn:hover {
   background: #182b41;
   border-color: #3d5d7e;
   color: #fff;
+}
+
+.admin-shell ~ dialog .notif-records-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #1e3248;
+}
+
+.admin-shell ~ dialog .notif-records-section h3 {
+  margin: 0 0 10px;
+  font-size: .92rem;
+  font-weight: 700;
+  color: #e6f2ff;
+}
+
+.admin-shell ~ dialog .notif-records-list {
+  display: grid;
+  gap: 8px;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.admin-shell ~ dialog .notif-record-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #0a1421;
+  border: 1px solid #1e3248;
+  border-radius: 9px;
+}
+
+.admin-shell ~ dialog .notif-record-copy strong {
+  display: block;
+  font-size: .88rem;
+  color: #e8f4ff;
+  margin-bottom: 3px;
+}
+
+.admin-shell ~ dialog .notif-record-copy p {
+  margin: 0 0 4px;
+  font-size: .83rem;
+  color: #b4c8dd;
+  line-height: 1.4;
+}
+
+.admin-shell ~ dialog .notif-record-copy small {
+  color: #6f89a3;
+  font-size: .74rem;
+}
+
+.admin-shell ~ dialog .notif-delete-btn {
+  flex-shrink: 0;
+  margin-right: 0;
 }
 
 .admin-shell .icon-action-btn.approve-btn {
