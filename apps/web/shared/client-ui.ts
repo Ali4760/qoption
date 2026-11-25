@@ -281,15 +281,15 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         </button>
 
         <div class="balance-group">
-          <button type="button" class="hdr-ico" data-action="client-toggle-notif" title="Notifications" aria-label="Notifications">
-            ${clientIcons.bell}
-            <div class="notif-badge" id="notifBadge">${state.unreadNotifs > 0 ? state.unreadNotifs : ''}</div>
-          </button>
-
           <div class="balance-display" data-action="client-nav" data-tab="wallet" role="button" tabindex="0" title="Available balance">
             <div class="balance-label">REAL ACCOUNT</div>
             <div class="balance-val" id="headerBalance" style="color:${balColor}">${esc(balText)}</div>
           </div>
+
+          <button type="button" class="hdr-ico" data-action="client-toggle-notif" title="Notifications" aria-label="Notifications">
+            ${clientIcons.bell}
+            <div class="notif-badge" id="notifBadge">${state.unreadNotifs > 0 ? state.unreadNotifs : ''}</div>
+          </button>
 
           <button type="button" class="hdr-ico hdr-wallet-btn" data-action="client-open-deposit" title="Wallet" aria-label="Wallet">
             ${clientIcons.wallet}

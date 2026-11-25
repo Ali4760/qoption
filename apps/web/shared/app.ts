@@ -1258,7 +1258,17 @@ function details(action: string, row: Row) {
   const id = esc(row.id);
   const bankDetails = row.details && typeof row.details === 'object'
     ? Object.entries(row.details as Record<string, string>).map(([k, v]) => [label(k), v] as [string, unknown]) : [];
-  const info = definition([
+  // Build a human-readable copy string for bank details
+  const bd = row.details && typeof row.details === 'object' ? row.details as Record<string, string> : {};
+  const copyLines = [
+    bd.bank_name, bd.account_holder, bd.account_number,
+    bd.ifsc_swift || bd.routing_number || bd.iban || bd.sort_code || bd.bsb_code || bd.transit_number || bd.bank_code || bd.swift_bic,
+    bd.account_type, bd.branch_name, bd.branch_code, bd.institution_number,
+  ].filter(Boolean).join('\n');
+  const copyBtnHtml = bankDetails.length
+    ? `<button type="button" class="button secondary" style="margin-top:12px;width:100%;" onclick="navigator.clipboard.writeText(${JSON.stringify(copyLines)}).then(()=>{this.textContent='✓ Copied!';setTimeout(()=>{this.textContent='Copy Bank Details'},1800)})">Copy Bank Details</button>`
+    : '';
+  const adminInfo = definition([
     ['Reference', recordReference(row.id)],
     ['Type', label(row.kind)],
     ['Method', row.method || '—'],
@@ -1268,12 +1278,20 @@ function details(action: string, row: Row) {
     ['Decision reason', row.reason],
     ...bankDetails,
   ]) + (row.receiptUrl ? '<div style="margin-top:12px;text-align:center;"><img src="' + esc(String(row.receiptUrl)) + '" alt="Deposit receipt" style="max-width:100%;max-height:240px;border-radius:10px;border:1px solid rgba(148,178,208,0.2);"></div>' : '');
+  // For admin funding-detail view of withdrawals: show only bank details + copy button (not full metadata)
+  const isAdminWithdrawalView = admin && action === 'funding-detail' && row.kind === 'withdrawal';
+  const info = isAdminWithdrawalView
+    ? (bankDetails.length
+        ? definition(bankDetails) + copyBtnHtml
+        : '<p style="color:var(--iq-muted)">No bank details submitted with this withdrawal.</p>')
+    : adminInfo;
   if (action === 'review-funding') {
     dialog('Review ' + label(row.kind).toLowerCase(), info + '<form class="stack" data-form="admin.funding.decide"><input type="hidden" name="id" value="' + id +
       '"><label>Decision<select name="status"><option value="approved">Approve</option><option value="rejected">Reject</option></select></label>' +
       '<label>Reason<input name="reason" minlength="3" maxlength="240" required></label><button class="button">Record decision</button>' + formStatus() + '</form>');
   } else {
-    dialog('Funding receipt', info + (!admin && row.kind === 'withdrawal' && row.status === 'pending' ?
+    const title = isAdminWithdrawalView ? 'Bank Details' : 'Funding receipt';
+    dialog(title, info + (!admin && row.kind === 'withdrawal' && row.status === 'pending' ?
       '<form data-form="funding.cancel"><input type="hidden" name="id" value="' + id + '"><button class="button secondary">Cancel withdrawal</button>' + formStatus() + '</form>' : ''));
   }
 }
