@@ -86,14 +86,25 @@ async function main() {
     assert.equal(first.rows.length, 25);
     assert.equal(second.rows.length, 5);
     assert.equal(new Set([...first.rows, ...second.rows].map(row => row.id)).size, 30);
-    console.log('Firebase integration passed: account separation, rules, idempotent trades, settlement, funding, messaging, and pagination.');
+    const pushed = await call(staff, 'admin.notifications.push', { uid, title: 'Maintenance Alert', message: 'Scheduled check', requestId: randomUUID() });
+    const notifsBefore = await call(trader, 'list', { list: 'notifications' });
+    const targetNotif = notifsBefore.rows.find(row => row.id === pushed.id);
+    assert.ok(targetNotif, 'Pushed notification is listed for trader');
+    assert.equal(targetNotif.read, false);
+    await call(trader, 'notifications.read', { id: pushed.id, requestId: randomUUID() });
+    const notifsAfter = await call(trader, 'list', { list: 'notifications' });
+    const readNotif = notifsAfter.rows.find(row => row.id === pushed.id);
+    assert.ok(readNotif, 'Notification remains in list after being marked as read');
+    assert.equal(readNotif.read, true);
+
+    console.log('Firebase integration passed: account separation, rules, idempotent trades, settlement, funding, messaging, notifications, and pagination.');
   } finally {
     const cleanup = db.batch();
-    for (const name of ['trades', 'funding', 'ledger', 'messages', 'audit', 'operationReceipts']) {
+    for (const name of ['trades', 'funding', 'ledger', 'messages', 'notifications', 'audit', 'operationReceipts']) {
       const snapshot = await db.collection(name).where('uid', '==', uid).get();
       for (const doc of snapshot.docs) cleanup.delete(doc.ref);
     }
-    for (const name of ['profiles', 'wallets', 'writeLimits']) cleanup.delete(db.collection(name).doc(uid));
+    for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync']) cleanup.delete(db.collection(name).doc(uid));
     await cleanup.commit();
     await auth.deleteUser(uid);
   }

@@ -324,7 +324,6 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <span class="overlay-title">Notifications</span>
         <div class="overlay-actions">
           <button type="button" class="overlay-action-btn" style="color:var(--iq-blue);" data-action="client-read-notifs">READ ALL</button>
-          <button type="button" class="overlay-action-btn" style="color:var(--iq-red);" data-action="client-clear-notifs">CLEAR</button>
         </div>
       </div>
       <div id="notifList"></div>
@@ -507,6 +506,11 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <div style="font-size:13px;color:var(--iq-muted);margin-bottom:18px;line-height:1.45;" id="alertMsg"></div>
         <button type="button" class="replica-primary-btn" style="height:42px;background:var(--iq-blue);color:#fff;" data-action="client-close-alert">OK</button>
       </div>
+    </div>
+
+    <!-- On-Screen Push Notification Popup (stays until Mark as Read) -->
+    <div id="notifPopup" class="replica-modal-backdrop notif-popup-backdrop" role="dialog" aria-modal="true" aria-label="Notification">
+      <div class="notif-popup-stack" id="notifPopupStack"></div>
     </div>
   </div>`;
 }
@@ -963,16 +967,51 @@ export function buildProfileTabHtml(home: Home) {
   </div>`;
 }
 
-export function renderNotificationsOverlayList(home: Home, state: ClientState) {
+export function isNotifUnread(n: Row, home: Home) {
+  if (n.read === true) return false;
   const readAt = Number(home.profile.notificationReadAt || 0);
+  return Number(n.createdAt || 0) > readAt;
+}
+
+export function isPopupNotif(n: Row, home: Home) {
+  return isNotifUnread(n, home) && String(n.type || '').toUpperCase() !== 'TRADE';
+}
+
+export function renderNotificationsOverlayList(home: Home, state: ClientState) {
   if (!state.notifications.length) {
     return '<div style="padding:22px;text-align:center;color:var(--iq-muted);font-size:12px;font-weight:700;">No notifications</div>';
   }
-  return state.notifications.map(n => `
-    <div class="notif-item" style="opacity:${Number(n.createdAt || 0) > readAt ? 1 : 0.6}">
-      <div class="notif-title">${esc(n.title || 'Notification')}</div>
-      <div class="notif-body">${esc(n.message || '')}</div>
-      <div class="notif-time">${esc(dateTime(n.createdAt))}</div>
+  return state.notifications.map(n => {
+    const unread = isNotifUnread(n, home);
+    return `
+      <div class="notif-item${unread ? ' unread' : ''}" style="opacity:${unread ? 1 : 0.62}">
+        <div class="notif-title">${esc(n.title || 'Notification')}</div>
+        <div class="notif-body">${esc(n.message || '')}</div>
+        <div class="notif-foot">
+          <div class="notif-time">${esc(dateTime(n.createdAt))}</div>
+          ${unread
+            ? `<button type="button" class="notif-mark-btn" data-action="client-mark-notif-read" data-id="${esc(n.id)}">Mark as Read</button>`
+            : '<span class="notif-read-tag">Read</span>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+export function renderNotifPopupHtml(home: Home, state: ClientState) {
+  const pending = state.notifications.filter(n => isPopupNotif(n, home));
+  if (!pending.length) return '';
+  return pending.map(n => `
+    <div class="notif-popup-card">
+      <div class="notif-popup-head">
+        <div class="notif-popup-badge-wrap">
+          <span class="notif-popup-icon">${clientIcons.bell}</span>
+          <span class="notif-popup-kicker">Notification</span>
+        </div>
+        <span class="notif-popup-time">${esc(dateTime(n.createdAt))}</span>
+      </div>
+      <div class="notif-popup-title">${esc(n.title || 'Notification')}</div>
+      <div class="notif-popup-body">${esc(n.message || '')}</div>
+      <button type="button" class="replica-primary-btn notif-popup-btn" data-action="client-mark-notif-read" data-id="${esc(n.id)}">Mark as Read</button>
     </div>
   `).join('');
 }

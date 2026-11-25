@@ -747,7 +747,7 @@ async function adminNotificationPush(user: Actor, data: Data) {
     checkScope(user, (await tx.get(profile(uid))).data());
     const ref = db.collection('notifications').doc();
     const now = Date.now();
-    tx.create(ref, { uid, title, message, createdAt: now, createdBy: user.uid });
+    tx.create(ref, { uid, title, message, read: false, createdAt: now, createdBy: user.uid });
     audit(tx, user, uid, 'Notification pushed', `Notification pushed: ${title}`, now);
     return { id: ref.id };
   });
@@ -866,12 +866,23 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     case 'funding.request': return askFunding(user, data);
     case 'funding.cancel': return decideFunding(user, data, false);
     case 'profile.update': return updateProfile(user, data);
-    case 'notifications.read':
-      return mutate(user, data, op, null, async tx => {
+    case 'notifications.read': {
+      const notifId = typeof data.id === 'string' && data.id.trim() ? identifier(data.id) : null;
+      return mutate(user, data, op, notifId ? [notifId] : null, async tx => {
         const readAt = Date.now();
+        if (notifId) {
+          const ref = db.collection('notifications').doc(notifId);
+          const doc = await tx.get(ref);
+          if (!doc.exists || String(doc.get('uid') || '') !== user.uid) {
+            fail('not-found', 'Notification not found.');
+          }
+          tx.update(ref, { read: true, readAt });
+          return { id: notifId, readAt };
+        }
         tx.update(profile(user.uid), { notificationReadAt: readAt });
         return { readAt };
       });
+    }
     case 'notifications.clear':
       return mutate(user, data, op, null, async tx => {
         const now = Date.now();

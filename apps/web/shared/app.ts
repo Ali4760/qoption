@@ -14,8 +14,8 @@ import { actionButton, amountField, credits, dateTime, errorMessage, esc, formSt
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
   clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, fileToCompressedDataUrl, filterTrades, filterTransactions,
-  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotificationsOverlayList,
-  renderOrderBookHtml, renderTxnDetailHtml, validateBankDetails, type ClientState,
+  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, isPopupNotif, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotifPopupHtml,
+  renderNotificationsOverlayList, renderOrderBookHtml, renderTxnDetailHtml, validateBankDetails, type ClientState,
 } from './client-ui';
 
 const root = document.querySelector<HTMLElement>('#app')!;
@@ -100,6 +100,11 @@ const stopSync = () => {
   clientLoaded.trades = false;
   clientLoaded.notifications = false;
   clientLoaded.messages = false;
+  clientState.notifications = [];
+  clientState.unreadNotifs = 0;
+  clientState.messages = [];
+  clientState.fundingRows = [];
+  clientState.tradeRows = [];
   clientState.activeTrade = null;
 };
 const go = (target: string) => { if (location.hash === '#' + target) void render(); else location.hash = target; };
@@ -308,8 +313,7 @@ async function fetchLiveMarketQuotes() {
 
 function renderClientNotificationsUi() {
   if (!home) return;
-  const readAt = Number(home.profile.notificationReadAt || 0);
-  const unread = clientState.notifications.filter(n => Number(n.createdAt || 0) > readAt).length;
+  const unread = clientState.notifications.filter(n => isNotifUnread(n, home!)).length;
   clientState.unreadNotifs = unread;
   const badge = root.querySelector<HTMLElement>('#notifBadge');
   if (badge) {
@@ -318,6 +322,13 @@ function renderClientNotificationsUi() {
   }
   const listEl = root.querySelector<HTMLElement>('#notifList');
   if (listEl) listEl.innerHTML = renderNotificationsOverlayList(home, clientState);
+  const popup = root.querySelector<HTMLElement>('#notifPopup');
+  const popupStack = root.querySelector<HTMLElement>('#notifPopupStack');
+  if (popup && popupStack) {
+    const popupNotifs = clientState.notifications.filter(n => isPopupNotif(n, home!));
+    popupStack.innerHTML = renderNotifPopupHtml(home, clientState);
+    popup.classList.toggle('open', popupNotifs.length > 0);
+  }
 }
 
 function renderClientMessagesUi() {
@@ -1535,17 +1546,28 @@ root.addEventListener('click', async event => {
         root.querySelector('#notifOverlay')?.classList.remove('open');
         root.querySelector('#msgOverlay')?.classList.remove('open');
         break;
-      case 'client-read-notifs':
-        await api.call('notifications.read', { requestId: crypto.randomUUID() });
-        if (home) home.profile.notificationReadAt = Date.now();
+      case 'client-read-notifs': {
+        const res = await api.call<{ readAt?: number }>('notifications.read', { requestId: crypto.randomUUID() });
+        if (home) home.profile.notificationReadAt = Number(res.readAt || (Date.now() + clockOffset));
+        clientState.notifications = clientState.notifications.map(n => ({ ...n, read: true }));
         renderClientNotificationsUi();
         break;
-      case 'client-clear-notifs':
-        await api.call('notifications.clear', { requestId: crypto.randomUUID() });
-        clientState.notifications = [];
-        if (home) home.profile.notificationClearAt = Date.now();
-        renderClientNotificationsUi();
+      }
+      case 'client-mark-notif-read': {
+        const id = String(target.dataset.id || '').trim();
+        if (!id) break;
+        const btn = target.closest('button');
+        if (btn) btn.disabled = true;
+        try {
+          await api.call('notifications.read', { id, requestId: crypto.randomUUID() });
+          clientState.notifications = clientState.notifications.map(n => String(n.id) === id ? { ...n, read: true } : n);
+          renderClientNotificationsUi();
+        } catch (error) {
+          if (btn) btn.disabled = false;
+          clientAlert('Error', errorMessage(error));
+        }
         break;
+      }
       case 'client-toggle-asset-drop':
         root.querySelector('#timeList')?.classList.remove('show');
         root.querySelector('#assetList')?.classList.toggle('show');
