@@ -11,10 +11,10 @@ export const userNavGroups = [
 ];
 export const userNav = userNavGroups.flatMap(group => group.links);
 export const adminNavGroups = [
-  { name: 'Overview', links: [['overview', '▦', 'Dashboard', ''], ['clients', '◉', 'Clients', '']] },
-  { name: 'Operations', links: [['deposits', '⊕', 'Deposits', 'finance'], ['withdrawals', '⊖', 'Withdrawals', 'finance'],
-    ['trades', '⌁', 'Trade activity', 'admin']] },
-  { name: 'Records', links: [['audit', '▤', 'Audit log', 'admin']] },
+  { name: 'Overview', links: [['overview', '◈', 'Dashboard', ''], ['clients', '◉', 'Clients', '']] },
+  { name: 'Operations', links: [['deposits', '↓', 'Deposits', 'finance'], ['withdrawals', '↑', 'Withdrawals', 'finance'],
+    ['trades', '⟳', 'Trade activity', 'admin']] },
+  { name: 'Records', links: [['audit', '◧', 'Audit log', 'admin']] },
 ];
 export const adminNav = adminNavGroups.flatMap(group => group.links);
 const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
