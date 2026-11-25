@@ -6,20 +6,22 @@ import './client-replica.css';
 import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail,
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
+import { walletFreeze } from '../../../functions/src/wallet-freeze';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
+import { finishStartup, showStartup } from './startup';
 import { depositSettingsChanges, depositSettingsForm } from './admin-deposit';
 import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, brandContent, chartFrames, ledgerRows, messages, messageThread, pair, title, userNav } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type DepositSettings, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
-  clientChartPresentation, clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
+  clientChartPresentation, clientIcons, clientNavItems, clientWithdrawalRestriction, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
   fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml,
-  renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderTxnDetailHtml, updateNotifBanners, validateBankDetails, type ClientState,
+  renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderTxnDetailHtml,
+  updateNotifBanners, validateBankDetails, type ClientState,
 } from './client-ui';
 
 const root = document.querySelector<HTMLElement>('#app')!;
-const startup = document.querySelector<HTMLElement>('#startup')!;
 const admin = root.dataset.audience === 'admin';
 const first = admin ? 'overview' : 'trade';
 let api: Awaited<ReturnType<typeof connect>>;
@@ -39,6 +41,12 @@ const lists = new Map<string, List>();
 type CachedAdminView = { key: string; route: string; data: unknown; rows: Row[]; next: string | null; ts: number; dirty: boolean };
 const adminCache = new Map<string, CachedAdminView>();
 const CACHE_TTL = 60_000;
+const CLIENTS_PAGE_SIZE = 25;
+const CLIENT_IDLE_MS = 10 * 60_000;
+const CLIENT_ACTIVITY_SYNC_MS = 30_000;
+let clientActivityTimer = 0;
+let lastClientActivity = 0;
+let lastClientActivityReport = -Infinity;
 let syncUnsub: (() => void) | undefined;
 let syncInitialized = false;
 let prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0, messagesAt: 0 };
@@ -99,6 +107,9 @@ const stop = () => {
 const stopSync = () => {
   syncUnsub?.();
   syncUnsub = undefined;
+  window.clearTimeout(clientActivityTimer);
+  clientActivityTimer = 0;
+  lastClientActivityReport = -Infinity;
   syncInitialized = false;
   prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0, messagesAt: 0 };
   prevUserUpdatedAt = 0;
@@ -159,6 +170,16 @@ function remember(page: Page, current: List) {
   visibleRows = new Map(page.rows.map(row => [row.id, row]));
   current.next = page.cursor;
 }
+function updateWithdrawalRestriction(value: Home) {
+  const warning = root.querySelector<HTMLElement>('#withdrawalRestriction');
+  if (!warning) return;
+  const restriction = clientWithdrawalRestriction(value);
+  warning.textContent = restriction;
+  warning.hidden = !restriction;
+  const submit = root.querySelector<HTMLButtonElement>('#wdFormView button[type="submit"]');
+  if (submit) submit.disabled = Boolean(restriction || submit.form?.dataset.busy);
+}
+
 function setHome(value: Home) {
   const previousDeposit = home?.depositSettings;
   const nextDeposit = value.depositSettings;
@@ -173,10 +194,17 @@ function setHome(value: Home) {
     balance.textContent = credits(value.wallet.available);
     balance.closest('a')?.setAttribute('aria-label', 'Available credits: ' + balance.textContent);
   }
-  const hb = root.querySelector<HTMLElement>('#headerBalance');
-  if (hb) hb.textContent = fmtMoney(value.wallet.available, value);
-  const ab = root.querySelector<HTMLElement>('#assetsBalance');
-  if (ab) ab.textContent = fmtMoney(value.wallet.available, value);
+  const pill = root.querySelector('#realAccountPill');
+  if (pill) {
+    const html = renderRealAccountBalance(value);
+    if (pill.innerHTML !== html) pill.innerHTML = html;
+  }
+  const assets = root.querySelector('#walletBalanceCard');
+  if (assets) {
+    const html = renderAssetsBalance(value);
+    if (assets.innerHTML !== html) assets.innerHTML = html;
+  }
+  updateWithdrawalRestriction(value);
   if (value.profile.savedBank && !Object.keys(clientState.bankDraft).length) {
     clientState.bankCountry = value.profile.savedBank.country || 'India';
     clientState.bankDraft = { ...value.profile.savedBank };
@@ -678,9 +706,23 @@ function startRealtimeSync() {
   }
 }
 
-function setStartupVisible(visible: boolean) {
-  startup.hidden = !visible;
-  root.inert = visible;
+function reportClientActivity() {
+  clientActivityTimer = 0;
+  if (!access) return;
+  const now = performance.now();
+  const ageMs = Math.floor(now - lastClientActivity);
+  if (ageMs >= CLIENT_IDLE_MS) return;
+  lastClientActivityReport = now;
+  void api.call('client.activity', { ageMs }).catch(() => { /* Retry on later interactions. */ });
+}
+
+function noteClientActivity(event?: Event) {
+  if (admin || !access || document.hidden || (event && !event.isTrusted)) return;
+  lastClientActivity = performance.now();
+  if (clientActivityTimer) return;
+  const wait = CLIENT_ACTIVITY_SYNC_MS - (lastClientActivity - lastClientActivityReport);
+  if (wait > 0) clientActivityTimer = window.setTimeout(reportClientActivity, wait);
+  else reportClientActivity();
 }
 
 async function start() {
@@ -690,32 +732,37 @@ async function start() {
       const latest = ++authVersion;
       version++; stop(); stopSync(); access = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
       person = user; resolver = undefined; secret = undefined;
-      if (!user) { showAuth(); setStartupVisible(false); return; }
-      setStartupVisible(true);
+      if (!user) { showAuth(); void finishStartup(root); return; }
+      showStartup(root);
       root.replaceChildren();
       try {
         if (admin) {
-          const data = await api.call<{ roles: string[] }>('admin.access');
+          const data = await api.call<{ roles: string[]; serverTime?: number }>('admin.access');
           if (latest !== authVersion) return;
           roles = data.roles;
+          clockOffset = (data.serverTime ?? Date.now()) - Date.now();
         } else {
           const data = await api.call<Home>('access');
           if (latest !== authVersion) return;
           setHome(data);
         }
-        access = true; shell(); startRealtimeSync(); if (admin) void refreshAdminBadges(); await render();
+        access = true; shell(); startRealtimeSync();
+        if (admin) void refreshAdminBadges();
+        else noteClientActivity();
+        await render();
       } catch (error) {
         if (latest === authVersion) showAuth(errorMessage(error));
       } finally {
-        if (latest === authVersion) setStartupVisible(false);
+        if (latest === authVersion) void finishStartup(root);
       }
     });
   } catch (error) {
     root.innerHTML = '<main class="content">' + title('Workspace unavailable', errorMessage(error)) + '</main>';
-    setStartupVisible(false);
+    void finishStartup(root);
   }
 }
-type ClientBundle = { data: { profile: Profile; wallet: Wallet | null; activity: Page }; page: Page };
+type SupportPage = Page & { supportUnreadMarker?: string };
+type ClientBundle = { data: { profile: Profile; wallet: Wallet | null; activity: Page }; page: SupportPage };
 type OverviewData = Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string };
 type ListBundle = { rows: Row[]; next: string | null };
 
@@ -780,14 +827,20 @@ function buildOverviewHtml(values: OverviewData) {
     (role('admin') ? '<section class="panel" id="overview-recent-panel"><header class="panel-heading"><h2>Recent trades</h2></header><div class="panel-table-host">' + overviewRecentBody(values) + '</div></section>' : '') + '</div>';
 }
 
+function clientStatusHtml(row: Row, now = Date.now() + clockOffset) {
+  if (row.frozen === true) return '<span class="status-frozen">FROZEN</span>';
+  if (!row.tradeEnabled || !row.withdrawalEnabled) return '<span class="status-inactive">SUSPENDED</span>';
+  const lastActiveAt = Number(row.lastActiveAt || 0);
+  if (!lastActiveAt || now - lastActiveAt > CLIENT_IDLE_MS) return '<span class="status-idle">IDLE</span>';
+  return '<span class="status-active">ACTIVE</span>';
+}
+
 function clientRowCells(row: Row, index: number, startId: number) {
-  const isFrozen = row.frozen === true;
-  const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
   const uid = String(row.id || '');
-  const chatPending = row.supportNeedsReply === true;
-  const chatLabel = chatPending ? 'Chat with client · Awaiting reply' : 'Chat with client';
+  const chatPending = Boolean(row.supportUnreadMarker);
+  const chatLabel = chatPending ? 'Chat with client · Unread messages' : 'Chat with client';
   const shortUid = uid.slice(0, 8).toUpperCase();
-  const displayId = '#' + (startId - index);
+  const displayId = '#' + (startId + index);
   const vipRaw = String(row.vipLevel || 'VIP1');
   const vipUnverified = vipRaw.toLowerCase() === 'unverified';
   const vipLabel = vipUnverified ? 'UNVERIFIED' : vipRaw.toUpperCase().replace(/^VIP(\d)$/i, 'VIP $1');
@@ -799,7 +852,7 @@ function clientRowCells(row: Row, index: number, startId: number) {
     '<strong class="client-name">' + esc(String(row.name || '')) + '</strong><div class="client-email">' + esc(String(row.email || '')) + '</div><div class="client-uid">UID: ' + esc(shortUid) + '</div>',
     '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vipLabel) + '</span><div class="rep-score">Rep: ' + rep + '</div>',
     '₹' + credits(balance),
-    isFrozen ? '<span class="status-frozen">FROZEN</span>' : isActive ? '<span class="status-active">ACTIVE</span>' : '<span class="status-inactive">SUSPENDED</span>',
+    clientStatusHtml(row),
     '<div class="trade-mode-group">' +
       '<button type="button" class="trade-pill trade-auto' + (mode === 'auto' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="auto">Auto</button>' +
       '<button type="button" class="trade-pill trade-win' + (mode === 'win' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="win">Win</button>' +
@@ -829,7 +882,7 @@ function clientRowHtml(row: Row, index: number, startId: number) {
   '</tr>';
 }
 function buildClientsHtml(rows: Row[]) {
-  const search = list().search, startId = 1000 + rows.length;
+  const { search, page } = list(), startId = page * CLIENTS_PAGE_SIZE + 1;
   return '<div class="clients-page-header"><h1 class="clients-title">My Clients</h1>' +
     '<div class="clients-controls">' +
     '<form class="clients-search-form" data-form="search">' +
@@ -987,15 +1040,37 @@ async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ 
   if (targetRoute === 'client') {
     const uid = clientId(), thread = clientSection() === 'messages';
     const data = await api.call<{ profile: Profile; wallet: Wallet | null; activity: Page }>('admin.client', { uid, cursor: thread ? null : current.cursors[current.page] });
-    const page = thread ? await api.call<Page>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
+    const page = thread ? await api.call<SupportPage>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
     return { payload: { data, page }, rows: page.rows, next: page.cursor, clientRow: { ...data.profile, id: uid } };
   }
   let pageRes: Page;
-  if (targetRoute === 'clients') pageRes = await api.call<Page>('admin.clients', { search: current.search, cursor: current.cursors[current.page] });
+  if (targetRoute === 'clients') pageRes = await api.call<Page>('admin.clients', { search: current.search, cursor: current.cursors[current.page], limit: CLIENTS_PAGE_SIZE });
   else if (targetRoute === 'deposits' || targetRoute === 'withdrawals') pageRes = await api.call<Page>('admin.funding', { kind: targetRoute === 'withdrawals' ? 'withdrawal' : 'deposit', status: current.status, cursor: current.cursors[current.page] });
   else if (targetRoute === 'trades') pageRes = await api.call<Page>('admin.trades', { cursor: current.cursors[current.page] });
   else pageRes = await api.call<Page>('admin.audit', { cursor: current.cursors[current.page] });
   return { payload: { rows: pageRes.rows, next: pageRes.cursor }, rows: pageRes.rows, next: pageRes.cursor };
+}
+
+async function markVisibleChatRead(targetRoute: string, payload: unknown) {
+  if (targetRoute !== 'client' || clientSection() !== 'messages' || document.hidden) return;
+  const { page } = payload as ClientBundle;
+  const marker = page.supportUnreadMarker;
+  if (!marker) return;
+  const uid = clientId(), session = authVersion;
+  try {
+    const { read } = await api.call<{ read: boolean }>('admin.messages.read', { uid, marker });
+    if (!read || authVersion !== session) return;
+    delete page.supportUnreadMarker;
+    for (const entry of adminCache.values()) {
+      if (entry.route !== 'clients') continue;
+      const row = entry.rows.find(item => item.id === uid);
+      if (row?.supportUnreadMarker === marker) row.supportUnreadMarker = null;
+    }
+    if (route === 'clients') {
+      const cached = adminCache.get(adminCacheKey());
+      if (cached) patchAdminDom('clients', cached.data);
+    }
+  } catch { /* Keep the unread marker until the read can be saved. */ }
 }
 
 function patchTableRows(
@@ -1084,7 +1159,7 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
   }
   const { rows } = payload as ListBundle;
   if (targetRoute === 'clients') {
-    const startId = 1000 + rows.length;
+    const startId = list().page * CLIENTS_PAGE_SIZE + 1;
     return patchTableRows(
       'clients-tbody', 'clients-blank', rows,
       (row, i) => clientRowCells(row, i, startId),
@@ -1132,6 +1207,7 @@ async function silentRefreshCurrentRoute(button?: HTMLElement) {
       if (!patchAdminDom(activeRoute, result.payload)) {
         content().innerHTML = buildAdminHtml(activeRoute, result.payload);
       }
+      void markVisibleChatRead(activeRoute, result.payload);
     }
   } catch { /* Retain visible cached view silently on transient network error. */ }
   finally {
@@ -1161,6 +1237,44 @@ async function silentRefreshUserView() {
   } catch { /* Retain current user view on transient error. */ }
 }
 
+function updateVisibleClientStatuses() {
+  const now = Date.now() + clockOffset;
+  for (const tr of root.querySelectorAll<HTMLTableRowElement>('#clients-tbody tr[data-row-id]')) {
+    const row = visibleRows.get(tr.dataset.rowId || '');
+    const cell = tr.querySelector('.client-status-cell');
+    if (!row || !cell) continue;
+    const html = clientStatusHtml(row, now);
+    if (cell.innerHTML !== html) cell.innerHTML = html;
+  }
+}
+
+function startAdminClientActivityRefresh() {
+  let nextPoll = 0;
+  let polling = false;
+  refreshTimer = window.setInterval(async () => {
+    if (document.hidden || !access || !root.querySelector('#clients-tbody')) return;
+    updateVisibleClientStatuses();
+    const view = visibleRows;
+    if (!view.size || polling || Date.now() < nextPoll) return;
+
+    polling = true;
+    nextPoll = Date.now() + CLIENT_ACTIVITY_SYNC_MS;
+    try {
+      const { rows, serverTime } = await api.call<{ rows: { id: string; lastActiveAt: number }[]; serverTime: number }>(
+        'admin.clients.activity', { uids: [...view.keys()] }
+      );
+      if (!access || view !== visibleRows || route !== 'clients') return;
+      clockOffset = serverTime - Date.now();
+      for (const { id, lastActiveAt } of rows) {
+        const row = view.get(id);
+        if (row) row.lastActiveAt = Math.max(Number(row.lastActiveAt || 0), lastActiveAt);
+      }
+      updateVisibleClientStatuses();
+    } catch { /* Retry on the next poll. */ }
+    finally { polling = false; }
+  }, 1000);
+}
+
 async function render() {
   if (!access) return;
   const run = ++version, target = part(0) || first;
@@ -1176,6 +1290,7 @@ async function render() {
   }
   stop();
   route = nav().some(item => item[0] === target) || (admin && target === 'client' && clientId()) ? target : first;
+  if (route === 'clients') startAdminClientActivityRefresh();
   const locationLabel = root.querySelector('#workspace-location');
   if (locationLabel) locationLabel.textContent = routeName();
   for (const link of root.querySelectorAll<HTMLElement>('[data-nav]')) {
@@ -1187,6 +1302,7 @@ async function render() {
   if (cached) {
     applyCachedRows(cached.rows, cached.next, route === 'client' ? { ...(cached.data as ClientBundle).data.profile, id: clientId() } : undefined);
     content().innerHTML = buildAdminHtml(route, cached.data);
+    void markVisibleChatRead(route, cached.data);
     if (cached.dirty || Date.now() - cached.ts > CACHE_TTL) {
       void silentRefreshCurrentRoute();
     }
@@ -1203,6 +1319,7 @@ async function render() {
     adminCache.set(key, { key, route, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
     applyCachedRows(result.rows, result.next, result.clientRow);
     content().innerHTML = buildAdminHtml(route, result.payload);
+    void markVisibleChatRead(route, result.payload);
   } catch (error) {
     if (run === version) content().innerHTML = title(routeName(), errorMessage(error)) + '<button class="button secondary" data-action="reload">Try again</button>';
   } finally { clearTimeout(delay); }
@@ -1258,8 +1375,10 @@ async function executeClientTrade(dir: 'up' | 'down', amountRupees: number, durS
     return;
   }
   const stakeCents = Math.round(amountRupees * 100);
-  if (stakeCents > Number(home.wallet.available || 0)) {
-    clientAlert('Insufficient Balance', `Available balance is ${fmtMoney(home.wallet.available, home)}.`);
+  const freeze = walletFreeze(home.wallet.available, home.profile);
+  const available = freeze.kind === 'amount' ? freeze.available : home.wallet.available;
+  if (stakeCents > available) {
+    clientAlert('Insufficient Balance', `Available for trading: ${fmtMoney(available, home)}.`);
     return;
   }
   root.querySelector('#tradeConfirmOverlay')?.classList.remove('open');
@@ -1446,12 +1565,35 @@ async function loadClientNotifications(uid: string) {
 }
 
 let searchDebounceTimer = 0;
+let pressedDialogBackdrop: HTMLDialogElement | null = null;
+
+function adminDialogBackdrop(event: MouseEvent) {
+  if (!admin || !access) return null;
+  const box = panel();
+  if (!box?.open || event.target !== box) return null;
+  // Both the backdrop and the dialog's own padding can target the dialog element.
+  const { left, right, top, bottom } = box.getBoundingClientRect();
+  return event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom ? box : null;
+}
+
+root.addEventListener('pointerdown', event => {
+  if (event.isPrimary) pressedDialogBackdrop = event.button === 0 ? adminDialogBackdrop(event) : null;
+});
+root.addEventListener('pointercancel', event => {
+  if (event.isPrimary) pressedDialogBackdrop = null;
+});
 
 root.addEventListener('keydown', event => {
   if (event.key === 'Escape' && root.querySelector('.sidebar.open') && !panel().open) dismissNavigation(true);
 });
 
 root.addEventListener('click', async event => {
+  const backdrop = pressedDialogBackdrop;
+  pressedDialogBackdrop = null;
+  if (backdrop && event.detail > 0 && backdrop === adminDialogBackdrop(event) && !backdrop.querySelector('form[data-busy]')) {
+    backdrop.close();
+    return;
+  }
   const target = (event.target as Element).closest<HTMLElement>('[data-action], [data-nav]');
   if (!target) return;
   const action = target.dataset.action, id = target.dataset.id || '';
@@ -1863,6 +2005,7 @@ root.addEventListener('click', async event => {
       case 'edit-client': {
         const row = visibleRows.get(id);
         if (!row) { toast('Client data not loaded. Try refreshing.'); break; }
+        const frozenAmount = Number(row.frozenAmount || 0);
         const vipVal = String(row.vipLevel || 'VIP1');
         const vipOptions: [string, string][] = [
           ['Unverified', 'Unverified'],
@@ -1891,7 +2034,10 @@ root.addEventListener('click', async event => {
           '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="tradeEnabled" class="toggle-cb"' + (row.tradeEnabled ? ' checked' : '') + '><span class="toggle-track"></span></span>Allow Trading</label>' +
           '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="withdrawalEnabled" class="toggle-cb"' + (row.withdrawalEnabled ? ' checked' : '') + '><span class="toggle-track"></span></span>Allow Withdrawals</label>' +
           '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="frozen" class="toggle-cb freeze-cb"' + (row.frozen ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE ACCOUNT <span class="freeze-note">(Restrict All Access)</span></label>' +
-          '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="freezeAmount" class="toggle-cb freeze-cb"' + (row.freezeAmount ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE AMOUNT <span class="freeze-note">(Restrict Withdrawals)</span></label>' +
+          '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="freezeAmount" class="toggle-cb freeze-cb"' + (row.freezeAmount ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE AMOUNT</label>' +
+          '<label class="frozen-amount-field">Amount to freeze<input type="number" name="frozenAmount" min="0.01" step="0.01"' + (row.freezeAmount ? '' : ' disabled') + ' value="' +
+          (row.freezeAmount && frozenAmount > 0 ? (frozenAmount / 100).toFixed(2) : '') +
+          '"><small>Enter an amount to reserve it from trades and withdrawals. Leave it blank to freeze all withdrawals.</small></label>' +
           '</div>' +
           '<div class="currency-section"><h3>Client currency</h3>' +
           '<label>CURRENCY OVERRIDE<select name="currency">' +
@@ -1986,6 +2132,7 @@ root.addEventListener('click', async event => {
       }
       case 'client-chat':
         lists.delete('client:' + id + ':messages');
+        adminCache.delete('client:' + id + ':messages:0');
         go('client/' + encodeURIComponent(id) + '/messages');
         break;
       case 'new-client': {
@@ -2045,7 +2192,11 @@ root.addEventListener('click', event => {
 });
 
 root.addEventListener('change', event => {
-  const node = event.target as HTMLSelectElement;
+  const node = event.target as HTMLInputElement | HTMLSelectElement;
+  if (admin && node instanceof HTMLInputElement && node.name === 'freezeAmount') {
+    const amount = node.form?.querySelector<HTMLInputElement>('[name="frozenAmount"]');
+    if (amount) amount.disabled = !node.checked;
+  }
   if (node.id === 'funding-status') { list().status = node.value; resetList(); void render(); }
   if (!admin && node.id === 'wdCountry') {
     clientState.bankCountry = node.value || 'India';
@@ -2192,6 +2343,7 @@ root.addEventListener('submit', async event => {
     }
 
     if (op === 'client.deposit') {
+      if (home?.profile.frozen) throw new Error('Account is frozen. Contact support.');
       const amt = Number(values.amount || clientState.depositPresetAmount || 0);
       if (!Number.isFinite(amt) || amt < 1) throw new Error('Please enter a valid deposit amount.');
       const referenceNumber = String(values.referenceNumber || '').trim();
@@ -2221,13 +2373,18 @@ root.addEventListener('submit', async event => {
     }
 
     if (op === 'client.withdraw') {
-      if (Number(home?.profile.reputationScore ?? 100) < 100) {
-        throw new Error('Withdrawals require a Reputation Score of at least 100.');
-      }
+      if (!home) return;
+      const restriction = clientWithdrawalRestriction(home);
+      if (restriction) throw new Error(restriction);
       const amt = Number(values.amount || 0);
       const pin = String(values.withdrawalPin || '').trim();
       const country = String(values.country || clientState.bankCountry || 'India');
       if (!Number.isFinite(amt) || amt < 1) throw new Error('Enter a valid withdrawal amount.');
+      const amount = cents(amt);
+      const freeze = walletFreeze(home.wallet.available, home.profile);
+      if (freeze.kind === 'amount' && amount > freeze.available) {
+        throw new Error(`Available for withdrawal: ${fmtMoney(freeze.available, home)}.`);
+      }
       if (!pin) throw new Error('Enter your Withdrawal PIN.');
       const bankDetails: Record<string, string> = { country };
       for (const el of form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-bank-field]')) {
@@ -2240,7 +2397,7 @@ root.addEventListener('submit', async event => {
       clientState.bankDraft = { ...bankDetails };
       await api.call('funding.request', {
         kind: 'withdrawal',
-        amount: cents(amt),
+        amount,
         method: 'Bank Transfer',
         bankDetails,
         withdrawalPin: pin,
@@ -2271,7 +2428,10 @@ root.addEventListener('submit', async event => {
       params.tradeEnabled = values.tradeEnabled === 'on';
       params.withdrawalEnabled = values.withdrawalEnabled === 'on';
       params.frozen = values.frozen === 'on';
-      if (op === 'admin.client.update') params.freezeAmount = values.freezeAmount === 'on';
+      if (op === 'admin.client.update') {
+        params.freezeAmount = values.freezeAmount === 'on';
+        params.frozenAmount = params.freezeAmount ? Number(values.frozenAmount || 0) : 0;
+      }
       if (values.reputationScore !== undefined && String(values.reputationScore).trim() !== '') params.reputationScore = Number(values.reputationScore);
       if (!String(values.password || '').trim()) delete params.password;
       if (!String(values.withdrawalPin || '').trim()) delete params.withdrawalPin;
@@ -2340,19 +2500,30 @@ root.addEventListener('submit', async event => {
     if (!admin && access && op !== 'message.send') clientAlert('Error', errorMessage(error));
     else showFormStatus(form, errorMessage(error));
   }
-  finally { delete form.dataset.busy; buttons.forEach(button => { button.disabled = false; }); }
+  finally {
+    delete form.dataset.busy;
+    buttons.forEach(button => { button.disabled = false; });
+    if (op === 'client.withdraw' && home) updateWithdrawalRestriction(home);
+  }
 });
 window.addEventListener('hashchange', () => {
   dismissNavigation();
   void render();
 });
+if (!admin) {
+  for (const event of ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const) {
+    window.addEventListener(event, noteClientActivity, { passive: true });
+  }
+}
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !access) return;
   if (admin) {
     const cached = adminCache.get(adminCacheKey(route));
     if (!cached || cached.dirty) void silentRefreshCurrentRoute();
-  } else if (!syncInitialized || (clientState.activeTrade && clientState.activeTrade.dueAt <= Date.now() + clockOffset)) {
-    void silentRefreshUserView();
+    else void markVisibleChatRead(route, cached.data);
+  } else {
+    noteClientActivity();
+    if (!syncInitialized || (clientState.activeTrade && clientState.activeTrade.dueAt <= Date.now() + clockOffset)) void silentRefreshUserView();
   }
 });
 window.addEventListener('pagehide', stop);

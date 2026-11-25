@@ -35,6 +35,7 @@ async function main() {
   const trader = await identityCall('signUp', email);
   const staff = await identityCall('signInWithPassword', 'staff@example.test');
   const uid = trader.localId;
+  let otherStaff;
   try {
     await call(null, 'access', {}, 401);
     await call(trader, 'admin.access', {}, 403);
@@ -44,6 +45,21 @@ async function main() {
       headers: { Authorization: 'Bearer ' + trader.idToken },
     });
     assert.equal(unauthorised.status, 403, 'Direct reads obey Firestore rules');
+
+    await call(null, 'client.activity', { ageMs: 0 }, 401);
+    await call(staff, 'client.activity', { ageMs: 0 }, 403);
+    await call(trader, 'client.activity', { ageMs: -1 }, 400);
+    await call(trader, 'admin.clients.activity', { uids: [uid] }, 403);
+    const previousActivity = await call(trader, 'client.activity', { ageMs: 20_000 });
+    const resumedActivity = await call(trader, 'client.activity', { ageMs: 0, uid: staff.localId });
+    assert.ok(resumedActivity.lastActiveAt > previousActivity.lastActiveAt);
+    const delayedActivity = await call(trader, 'client.activity', { ageMs: 45_000 });
+    assert.equal(delayedActivity.lastActiveAt, resumedActivity.lastActiveAt);
+    assert.deepEqual((await call(staff, 'admin.clients.activity', { uids: [uid] })).rows, [
+      { id: uid, lastActiveAt: resumedActivity.lastActiveAt },
+    ]);
+    const listedClient = (await call(staff, 'admin.clients', { search: uid })).rows.find(row => row.id === uid);
+    assert.equal(listedClient?.lastActiveAt, resumedActivity.lastActiveAt);
 
     const tradeInput = { symbol: 'BTCUSDT', amount: 1000, direction: 'up', duration: 30, requestId: randomUUID() };
     const [placed, retry] = await Promise.all([call(trader, 'trade.place', tradeInput), call(trader, 'trade.place', tradeInput)]);
@@ -102,14 +118,41 @@ async function main() {
     await call(staff, 'admin.funding.decide', decision);
     assert.equal((await call(trader, 'home')).wallet.available, settled.wallet.available + 2500);
     await call(staff, 'admin.funding.decide', { ...decision, requestId: randomUUID() }, 400);
-    await call(trader, 'message.send', { message: 'Test message', requestId: randomUUID() });
+    const unreadMarker = async viewer => (await call(viewer, 'admin.clients', { search: uid })).rows.find(row => row.id === uid)?.supportUnreadMarker;
+    await db.collection('profiles').doc(uid).update({ supportNeedsReply: true });
+    await db.collection('messages').add({ uid, sender: 'You', message: 'Legacy unread message', createdAt: Date.now() - 1000 });
+    assert.equal(await unreadMarker(staff), 'legacy');
+    const legacyThread = await call(staff, 'admin.messages', { uid });
+    assert.equal(legacyThread.supportUnreadMarker, 'legacy');
+    assert.equal((await call(staff, 'admin.messages.read', { uid, marker: 'legacy' })).read, true);
+    assert.equal(await unreadMarker(staff), null);
+
+    const sent = await call(trader, 'message.send', { message: 'Test message', requestId: randomUUID() });
+    assert.equal(await unreadMarker(staff), sent.id);
     const thread = await call(staff, 'admin.messages', { uid });
     assert.equal(thread.rows[0].message, 'Test message');
-    assert.equal((await db.collection('profiles').doc(uid).get()).get('supportNeedsReply'), true);
+    assert.equal(thread.supportUnreadMarker, sent.id);
+    await call(trader, 'admin.messages.read', { uid, marker: sent.id }, 403);
+    assert.equal((await call(staff, 'admin.messages.read', { uid, marker: sent.id })).read, true);
+    assert.equal(await unreadMarker(staff), null);
+    assert.equal((await call(staff, 'admin.messages', { uid })).supportUnreadMarker, undefined);
+
+    otherStaff = await identityCall('signUp', 'support-' + randomUUID() + '@example.test');
+    const otherStaffRef = db.collection('staff').doc(otherStaff.localId);
+    await otherStaffRef.set({ active: true, roles: ['support'], allClients: false });
+    assert.deepEqual((await call(otherStaff, 'admin.clients.activity', { uids: [uid] })).rows, []);
+    await otherStaffRef.update({ allClients: true });
+    assert.equal(await unreadMarker(otherStaff), sent.id);
+
+    const followup = await call(trader, 'message.send', { message: 'Follow-up', requestId: randomUUID() });
+    assert.equal((await call(staff, 'admin.messages.read', { uid, marker: sent.id })).read, false);
+    assert.equal(await unreadMarker(staff), followup.id);
     await call(staff, 'admin.message.send', { uid, message: 'Support reply', requestId: randomUUID() });
     const customerThread = await call(trader, 'list', { list: 'messages' });
     assert.ok(customerThread.rows.some(row => row.sender === 'Support' && row.message === 'Support reply'));
-    assert.equal((await db.collection('profiles').doc(uid).get()).get('supportNeedsReply'), false);
+    assert.equal(await unreadMarker(staff), followup.id);
+    assert.equal((await call(staff, 'admin.messages.read', { uid, marker: followup.id })).read, true);
+    assert.equal(await unreadMarker(staff), null);
 
     const batch = db.batch();
     for (let index = 0; index < 28; index++) {
@@ -132,7 +175,40 @@ async function main() {
     assert.ok(readNotif, 'Notification remains in list after being marked as read');
     assert.equal(readNotif.read, true);
 
-    console.log('Firebase integration passed: account separation, rules, trades, funding references, deposit settings, support chat, notifications, and pagination.');
+    const beforeFreeze = (await call(trader, 'home')).wallet;
+    const setFreeze = options => call(staff, 'admin.client.update', { uid, ...options, requestId: randomUUID() });
+    const withdraw = (amount, expected = 200) => call(trader, 'funding.request', { kind: 'withdrawal', amount, requestId: randomUUID() }, expected);
+    const place = (amount, expected = 200) => call(trader, 'trade.place', { ...tradeInput, amount, requestId: randomUUID() }, expected);
+    await setFreeze({ frozen: true });
+    assert.equal((await call(trader, 'home')).profile.frozen, true);
+    await place(100, 400);
+    await withdraw(100, 400);
+    await setFreeze({ frozen: false, freezeAmount: true, frozenAmount: 0 });
+    await withdraw(100, 400);
+
+    const available = 2000;
+    const amountToFreeze = beforeFreeze.available - available;
+    await setFreeze({ freezeAmount: true, frozenAmount: amountToFreeze / 100 });
+    const partiallyFrozen = await call(trader, 'home');
+    assert.equal(partiallyFrozen.profile.frozenAmount, amountToFreeze);
+    assert.deepEqual(partiallyFrozen.wallet, beforeFreeze);
+    await place(available + 1, 400);
+    await withdraw(available + 1, 400);
+    const remainingWithdrawal = await withdraw(available);
+    assert.equal((await call(trader, 'home')).wallet.available, amountToFreeze);
+    await place(100, 400);
+    await call(trader, 'funding.cancel', { id: remainingWithdrawal.id, requestId: randomUUID() });
+    await place(available);
+    assert.equal((await call(trader, 'home')).wallet.available, amountToFreeze);
+
+    await setFreeze({ freezeAmount: false, frozenAmount: 0 });
+    const unfrozen = await call(trader, 'home');
+    assert.equal(unfrozen.profile.freezeAmount, false);
+    assert.equal(unfrozen.profile.frozenAmount, 0);
+    const unfrozenWithdrawal = await withdraw(100);
+    await call(trader, 'funding.cancel', { id: unfrozenWithdrawal.id, requestId: randomUUID() });
+
+    console.log('Firebase integration passed: account separation, rules, client activity, trades, funding references, deposit settings, support chat, notifications, wallet freezes, and pagination.');
   } finally {
     const cleanup = db.batch();
     for (const name of ['trades', 'funding', 'ledger', 'messages', 'notifications', 'audit', 'operationReceipts']) {
@@ -140,8 +216,11 @@ async function main() {
       for (const doc of snapshot.docs) cleanup.delete(doc.ref);
     }
     for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync', 'depositSettings']) cleanup.delete(db.collection(name).doc(uid));
+    cleanup.delete(db.collection('staff').doc(staff.localId).collection('supportReads').doc(uid));
+    if (otherStaff) cleanup.delete(db.collection('staff').doc(otherStaff.localId));
     await cleanup.commit();
     await auth.deleteUser(uid);
+    if (otherStaff) await auth.deleteUser(otherStaff.localId);
   }
 }
 await main();

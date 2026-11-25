@@ -964,6 +964,7 @@
 }
 
 .admin-shell .status-active,
+.admin-shell .status-idle,
 .admin-shell .status-inactive,
 .admin-shell .status-frozen,
 .admin-shell .trade-status-win,
@@ -984,6 +985,12 @@
   color: var(--admin-green);
   background: rgba(31, 214, 164, .12);
   border: 1px solid rgba(31, 214, 164, .32);
+}
+
+.admin-shell .status-idle {
+  color: #f6c35e;
+  background: rgba(246, 195, 94, .12);
+  border: 1px solid rgba(246, 195, 94, .32);
 }
 
 .admin-shell .status-inactive,
@@ -1266,6 +1273,17 @@
   font-size: .96rem;
   font-weight: 700;
   color: #e6f2ff;
+}
+
+.admin-shell ~ dialog .frozen-amount-field {
+  display: none;
+}
+.admin-shell ~ dialog .permissions-section:has([name="freezeAmount"]:checked) .frozen-amount-field {
+  display: grid;
+  gap: 5px;
+}
+.admin-shell ~ dialog .frozen-amount-field small {
+  color: #93acc6;
 }
 
 .admin-shell ~ dialog .toggle-row {

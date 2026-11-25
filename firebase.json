@@ -62,7 +62,7 @@
     ],
     "redirects": [
       {
-        "source": "/home.html",
+        "regex": "^/home\\.html$",
         "destination": "/",
         "type": 301
       }

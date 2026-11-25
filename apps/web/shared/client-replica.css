@@ -217,6 +217,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+#app-interface .balance-display:has(.balance-freeze-badge) {
+  border-color: rgba(126, 211, 255, 0.55);
+  background: linear-gradient(140deg, #102438, #17344a);
+  box-shadow: inset 0 0 10px rgba(126, 211, 255, 0.14);
+}
+#app-interface .balance-display:has(.balance-freeze-badge) :is(.balance-label, .balance-val) {
+  color: #d2f1ff;
+}
+#app-interface .balance-freeze-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #7ed3ff;
+  font-size: 9px;
+  font-weight: 700;
+}
+#app-interface .balance-freeze-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
 /* ---------- Desktop Left Icon Rail ---------- */
 #app-interface .left-sidebar {
   grid-row: 3;
@@ -401,9 +422,10 @@
 
 #app-interface .chart-controls {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-inline-start: auto;
   max-width: 100%;
 }
 
@@ -455,6 +477,24 @@
 }
 #app-interface:not(.market-active) .chart-mode-toggle {
   display: none;
+}
+
+@media (max-width: 375px) {
+  #app-interface .top-bar:has(.balance-freeze-badge) .asset-btn-desk {
+    padding-inline: 5px;
+  }
+  #app-interface .top-bar:has(.balance-freeze-badge) #headerAsset {
+    display: none;
+  }
+  #app-interface .top-bar:has(.balance-freeze-badge) .balance-group {
+    gap: 4px;
+  }
+  #app-interface .top-bar:has(.balance-freeze-badge) .balance-display {
+    padding-inline: 7px;
+  }
+  #app-interface .top-bar:has(.balance-freeze-badge) .hdr-ico {
+    width: 28px;
+  }
 }
 
 @media (max-width: 420px) {
@@ -817,6 +857,52 @@
   font-weight: 800;
   margin: 10px 0 0;
   font-variant-numeric: tabular-nums;
+}
+
+#app-interface .wallet-card-dark:has(.wallet-freeze-status) {
+  border-color: rgba(126, 211, 255, 0.42);
+  background: linear-gradient(145deg, #162c40, var(--iq-panel));
+}
+#app-interface .wallet-freeze-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #7ed3ff;
+}
+#app-interface .wallet-freeze-status h2 {
+  margin: 0;
+  color: #d2f1ff;
+  font-size: 24px;
+}
+#app-interface .wallet-freeze-note {
+  margin: 6px 0 0;
+  color: #aac9dd;
+  font-size: 13px;
+}
+#app-interface .wallet-balance-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--iq-border);
+}
+#app-interface .wallet-balance-breakdown dt {
+  color: #aac9dd;
+  font-size: 12px;
+}
+#app-interface .wallet-balance-breakdown dd {
+  margin: 4px 0 0;
+  color: var(--iq-text);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+#app-interface .withdrawal-restriction {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 #app-interface .asset-tabs {
@@ -1422,9 +1508,14 @@
   display: none;
   box-shadow: 0 14px 42px rgba(0, 0, 0, 0.75);
 }
-#app-interface #notifOverlay.open,
-#app-interface #msgOverlay.open {
+#app-interface #notifOverlay.open {
   display: block;
+}
+#app-interface #msgOverlay.open {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 60dvh;
+  overflow: hidden;
 }
 #app-interface .overlay-header {
   padding: 12px 14px;
@@ -1600,7 +1691,7 @@
   font-size: 12px;
 }
 #app-interface .msg-convo {
-  max-height: 280px;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

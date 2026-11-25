@@ -8,7 +8,7 @@
 .home-skip:focus { transform: translateY(0); }
 .home-container { width: min(100% - 48px, 1160px); margin-inline: auto; }
 .home-header { position: sticky; top: 0; z-index: 4; border-bottom: 1px solid var(--line); background: var(--sidebar); }
-.home-header-grid { position: relative; display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(208px, 1fr); align-items: center; gap: 16px; min-height: 67px; }
+.home-header-grid { position: relative; display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(max-content, 1fr); align-items: center; gap: 16px; min-height: 67px; }
 :is(.home-header, .home-footer) .brand { gap: 9px; font-size: 1rem; }
 :is(.home-header, .home-footer) .brand-logo { width: 34px; height: 34px; }
 .home-nav { display: flex; align-items: center; gap: clamp(5px, 1.4vw, 17px); }
@@ -59,7 +59,7 @@
 }
 @media (max-width: 580px) {
   .home-container { width: calc(100% - 30px); }
-  .home-header-actions > a { display: none; }
+  .home-header-actions > a:not(.home-download-link) { display: none; }
   .home-nav .home-menu-account { display: flex; color: var(--accent); }
   .home-footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
   :is(.home-header, .home-footer) .brand { gap: 7px; font-size: .875rem; }

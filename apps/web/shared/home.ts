@@ -1,6 +1,7 @@
 import './style.css';
 import './public-shell';
 import './home.css';
+import { finishStartup } from './startup';
 import { assets, type Asset } from '../../../functions/src/market';
 import { formatPrice, mountChart, timeframes, type ChartMode } from './canvas-chart';
 
@@ -160,3 +161,4 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) stop(
 window.addEventListener('pagehide', stop);
 window.addEventListener('pageshow', event => { if (event.persisted) start(); });
 start();
+void finishStartup();

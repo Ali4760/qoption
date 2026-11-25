@@ -22,25 +22,48 @@
   letter-spacing: -.04em;
 }
 
+@supports (mask-image: none) or (-webkit-mask-image: none) {
+  .startup-q {
+    display: inline-block;
+    width: 1.21em;
+    height: .7em;
+    margin-inline-end: .035em;
+    overflow: hidden;
+    background-color: var(--startup-ink);
+    background-image: inherit;
+    background-position: inherit;
+    background-size: inherit;
+    background-repeat: inherit;
+    -webkit-mask: url("../assets/startup-q.svg") center / contain no-repeat;
+    mask: url("../assets/startup-q.svg") center / contain no-repeat;
+  }
+  .startup-q > span { display: none; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  @supports (background-clip: text) {
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
     .startup-wordmark {
-      background: linear-gradient(
-        105deg,
-        var(--startup-ink) 41%,
+      background: var(--startup-ink) linear-gradient(
+        90deg,
+        var(--startup-ink) 43%,
         #27e395 47%,
         #aaffd1 50%,
-        #26df8f 54%,
-        var(--startup-ink) 60%
-      ) 100% center / 260% 100% no-repeat;
+        #26df8f 53%,
+        var(--startup-ink) 57%
+      ) -8em center / 14em 100% no-repeat;
+      -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      animation: startup-shine 1.6s ease-in-out infinite;
+      animation: startup-shine 1.15s linear infinite;
     }
   }
 }
 
 @keyframes startup-shine {
-  from { background-position: 100% center; }
-  80%, to { background-position: 0% center; }
+  from { background-position: -8em center; }
+  38%, to { background-position: .25em center; }
+}
+
+@media (forced-colors: active) {
+  .startup-screen { forced-color-adjust: none; }
 }

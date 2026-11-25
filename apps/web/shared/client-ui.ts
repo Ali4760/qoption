@@ -1,6 +1,7 @@
 import logoUrl from '../assets/qoption-logo.png';
 import type { ChartMode } from './canvas-chart';
 import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
+import { walletFreeze } from '../../../functions/src/wallet-freeze';
 import { dateTime, errorMessage, esc, type Home, type Page, type Row } from './view';
 
 const bi = (paths: string, size = 18) =>
@@ -20,6 +21,7 @@ export function coinIcon(code: string, color: string, size = 20): string {
 }
 
 export const clientIcons = {
+  snowflake: bi('<path d="M8 1v14M2 4.5l12 7M2 11.5l12-7M6 2l2 2 2-2m-4 12 2-2 2 2M2 7l3-1-.5-3M14 9l-3 1 .5 3M2 9l3 1-.5 3M14 7l-3-1 .5-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>', 16),
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
   candlesticks: bi('<path d="M3 5v2m0 5v2m5-13v3m0 6v3m5-11v3m0 5v2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/><rect x="1.5" y="7" width="3" height="5" rx=".5"/><rect x="6.5" y="4" width="3" height="6" rx=".5"/><rect x="11.5" y="5" width="3" height="5" rx=".5"/>'),
@@ -60,6 +62,44 @@ export const fmtSignedMoney = (centsVal: unknown, home?: Home) => {
   const n = Number(centsVal ?? 0) / 100;
   return (n >= 0 ? '+' : '-') + curSym(home) + Math.abs(n).toFixed(2);
 };
+const freezeLabels = {
+  account: 'Account frozen',
+  amount: 'Amount frozen',
+  withdrawals: 'Withdrawals frozen',
+};
+
+export function renderRealAccountBalance(home: Home) {
+  const freeze = walletFreeze(home.wallet.available, home.profile);
+  const badge = freeze.kind === 'none' ? '' : `<span class="balance-freeze-badge">${clientIcons.snowflake}${freezeLabels[freeze.kind]}</span>`;
+  return `<span class="balance-label">Real Account</span><span class="balance-val">${esc(fmtMoney(home.wallet.available, home))}</span>${badge}`;
+}
+
+export function renderAssetsBalance(home: Home) {
+  const freeze = walletFreeze(home.wallet.available, home.profile);
+  const available = esc(fmtMoney(freeze.available, home));
+  if (freeze.kind === 'none') return `<small>Available balance</small><h2 id="assetsBalance">${available}</h2>`;
+  const explanation = freeze.kind === 'account' ? 'Trading, deposits, and withdrawals are restricted.'
+    : freeze.kind === 'withdrawals' ? 'Withdrawals are restricted for this account.'
+    : 'The frozen amount is reserved from trading and withdrawals.';
+  return `<div class="wallet-freeze-status">${clientIcons.snowflake}<h2>${freezeLabels[freeze.kind]}</h2></div>
+    <p class="wallet-freeze-note">${explanation}</p>
+    <dl class="wallet-balance-breakdown">
+      <div><dt>${freeze.kind === 'withdrawals' ? 'Balance locked for withdrawal' : 'Frozen balance'}</dt><dd>${esc(fmtMoney(freeze.frozenBalance, home))}</dd></div>
+      <div><dt>Available balance</dt><dd id="assetsBalance">${available}</dd></div>
+    </dl>`;
+}
+
+export function clientWithdrawalRestriction(home: Home) {
+  const freeze = walletFreeze(home.wallet.available, home.profile);
+  if (freeze.kind === 'account') return 'Account is frozen. Contact support.';
+  if (freeze.kind === 'withdrawals') return 'Withdrawals are frozen for this account.';
+  if (!home.profile.withdrawalEnabled) return 'Withdrawals are paused for this account.';
+  const rep = Number(home.profile.reputationScore ?? 100);
+  if (rep < 100) return `Withdrawals require a Reputation Score of at least 100 (current: ${rep}).`;
+  if (freeze.kind === 'amount' && freeze.available === 0) return 'There is no unfrozen balance available for withdrawal.';
+  return '';
+}
+
 export const formatPair = (sym: string) => sym.replace(/USDT$/, '/USD');
 export const formatDurationLabel = (sec: number) => sec >= 300 && sec % 60 === 0 ? `${sec / 60} min` : `${sec} sec`;
 
@@ -279,8 +319,6 @@ export function createLeaderboardData() {
 }
 
 export function buildClientShellHtml(home: Home, state: ClientState) {
-  const balText = fmtMoney(home.wallet.available, home);
-  const balColor = Number(home.wallet.available) < 0 ? 'var(--iq-green)' : 'var(--iq-green)';
   const chartPresentation = clientChartPresentation(state.chartMode);
   return `
   <div id="app-interface" class="${state.activeTab === 'market' ? 'market-active' : 'content-expanded'}">
@@ -294,17 +332,14 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
 
       <div class="top-right-controls">
-        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets">
+        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets" aria-label="Choose asset">
           ${coinIcon(state.selected.code, state.selected.color)}
           <span id="headerAsset">${esc(state.selected.code.slice(0, 2) + '...')}</span>
           ${clientIcons.chevronDown}
         </button>
 
         <div class="balance-group">
-          <div class="balance-display" data-action="client-nav" data-tab="wallet" role="button" tabindex="0" title="Available balance">
-            <div class="balance-label">REAL ACCOUNT</div>
-            <div class="balance-val" id="headerBalance" style="color:${balColor}">${esc(balText)}</div>
-          </div>
+          <button type="button" id="realAccountPill" class="balance-display" data-action="client-nav" data-tab="wallet" title="View Assets">${renderRealAccountBalance(home)}</button>
 
           <button type="button" class="hdr-ico" data-action="client-toggle-notif" title="Notifications" aria-label="Notifications">
             ${clientIcons.bell}
@@ -569,15 +604,13 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
   const isDep = state.walletSubTab === 'deposit';
   const presets = [1000, 3000, 5000, 10000, 25000, 50000];
   const isBsc = state.depositMethod === 'USDT_BSC';
+  const withdrawalRestriction = clientWithdrawalRestriction(home);
 
   return `
   <div class="wallet-wrap">
     <h4 class="wallet-page-h">Wallet</h4>
 
-    <div class="wallet-card-dark">
-      <small>AVAILABLE BALANCE</small>
-      <h2 id="assetsBalance">${esc(fmtMoney(home.wallet.available, home))}</h2>
-    </div>
+    <div id="walletBalanceCard" class="wallet-card-dark" aria-live="polite" aria-atomic="true">${renderAssetsBalance(home)}</div>
 
     <div class="asset-tabs">
       <button type="button" class="asset-tab-btn${isDep ? ' active' : ''}" data-action="client-wallet-tab" data-sub="deposit">Deposit</button>
@@ -628,14 +661,7 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
           <button type="button" class="autofill-btn" data-action="client-autofill-bank">Auto-Fill</button>
         </div>
 
-        ${(() => {
-          const rep = Number(home.profile.reputationScore ?? 100);
-          const lowRep = rep < 100;
-          const restricted = !home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount;
-          if (restricted) return '<p class="error" style="margin:0 0 12px;font-weight:700;font-size:13px;">Withdrawals are currently restricted for this account.</p>';
-          if (lowRep) return `<p class="error" style="margin:0 0 12px;font-weight:700;font-size:13px;">Withdrawals are blocked: Reputation Score must be at least 100 (current: ${rep}).</p>`;
-          return '';
-        })()}
+        <p id="withdrawalRestriction" class="withdrawal-restriction error" ${withdrawalRestriction ? '' : 'hidden'}>${esc(withdrawalRestriction)}</p>
 
         <form data-form="client.withdraw">
           <div class="field-stack">
@@ -662,7 +688,7 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
             ${!home.profile.hasWithdrawalPin ? '<div style="font-size:11px;color:#e8b86d;margin-top:5px;">Tip: Set your Withdrawal PIN in Settings before withdrawing.</div>' : ''}
           </div>
 
-          <button type="submit" class="replica-primary-btn" ${(!home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount || Number(home.profile.reputationScore ?? 100) < 100) ? 'disabled' : ''}>SUBMIT WITHDRAWAL</button>
+          <button type="submit" class="replica-primary-btn" ${withdrawalRestriction ? 'disabled' : ''}>SUBMIT WITHDRAWAL</button>
         </form>
       </div>
     </div>
@@ -959,8 +985,7 @@ export function buildProfileTabHtml(home: Home) {
   const shortUid = String(p.uid || '').slice(0, 7).toUpperCase();
   const vipLabel = String(p.vipLevel || 'Unverified');
   const rep = Number(p.reputationScore ?? 100);
-  const frozen = Boolean(p.frozen);
-  const frozenAmt = Number(p.frozenAmount || 0);
+  const freeze = walletFreeze(home.wallet.available, p);
 
   return `
   <div class="profile-wrap">
@@ -972,8 +997,8 @@ export function buildProfileTabHtml(home: Home) {
           <div class="prof-stat-box"><div class="prof-stat-label">UID</div><div class="prof-stat-val" id="dispUid">${esc(shortUid)}</div></div>
           <div class="prof-stat-box"><div class="prof-stat-label">VIP Level</div><div class="prof-stat-val" style="color:#e8b86d;" id="dispVip">${esc(vipLabel)}</div></div>
           <div class="prof-stat-box"><div class="prof-stat-label">Reputation</div><div class="prof-stat-val" style="color:var(--iq-green);" id="dispRep">${rep}</div></div>
-          <div class="prof-stat-box"><div class="prof-stat-label">Status</div><div class="prof-stat-val" id="dispStatus" style="color:${frozen ? 'var(--iq-red)' : 'var(--iq-green)'};">${frozen ? 'FROZEN' : 'ACTIVE'}</div></div>
-          ${frozenAmt > 0 ? `<div class="prof-stat-box" style="grid-column:1 / -1;border-color:rgba(255,93,114,0.45);"><div class="prof-stat-label" style="color:var(--iq-red);">Frozen Amount</div><div class="prof-stat-val" style="color:var(--iq-red);">${esc(fmtMoney(frozenAmt, home))}</div></div>` : ''}
+          <div class="prof-stat-box"><div class="prof-stat-label">Status</div><div class="prof-stat-val" id="dispStatus" style="color:${freeze.kind === 'none' ? 'var(--iq-green)' : 'var(--iq-red)'};">${freeze.kind === 'none' ? 'ACTIVE' : freezeLabels[freeze.kind].toUpperCase()}</div></div>
+          ${freeze.kind === 'amount' ? `<div class="prof-stat-box" style="grid-column:1 / -1;border-color:rgba(255,93,114,0.45);"><div class="prof-stat-label" style="color:var(--iq-red);">Frozen Amount</div><div class="prof-stat-val" style="color:var(--iq-red);">${esc(fmtMoney(freeze.frozenBalance, home))}</div></div>` : ''}
         </div>
       </div>
     </div>

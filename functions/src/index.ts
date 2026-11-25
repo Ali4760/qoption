@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldPath, getFirestore, type DocumentData, type Query, type Transaction } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, getFirestore, type DocumentData, type Query, type Transaction } from 'firebase-admin/firestore';
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { demoPrice, durations, findAsset, profitForDuration, profitPercent } from './market';
+import { walletFreeze } from './wallet-freeze';
 
 initializeApp();
 const db = getFirestore();
@@ -64,6 +65,34 @@ async function bumpSync(fields: Record<string, unknown>, userUids: string[] = []
 
 const profile = (uid: string) => db.collection('profiles').doc(uid);
 const wallet = (uid: string) => db.collection('wallets').doc(uid);
+
+async function recordClientActivity(uid: string, ageMs: unknown) {
+  if (typeof ageMs !== 'number' || !Number.isSafeInteger(ageMs) || ageMs < 0 || ageMs >= 600_000) {
+    fail('invalid-argument', 'Invalid activity age.');
+  }
+  const observedAt = Date.now() - ageMs;
+  return db.runTransaction(async tx => {
+    const ref = profile(uid);
+    const client = await tx.get(ref);
+    if (!client.exists) fail('failed-precondition', 'Open the workspace before recording activity.');
+    const previous = Number(client.get('lastActiveAt') || 0);
+    if (observedAt - previous < 5000) return { lastActiveAt: previous };
+    tx.update(ref, { lastActiveAt: observedAt });
+    return { lastActiveAt: observedAt };
+  });
+}
+
+async function adminClientActivity(user: Actor, uids: unknown) {
+  if (!Array.isArray(uids) || !uids.length || uids.length > 25) fail('invalid-argument', 'Select up to 25 clients.');
+  const refs = [...new Set(uids.map(identifier))].map(profile);
+  const clients = await db.getAll(...refs);
+  return {
+    rows: clients
+      .filter(client => client.exists && (user.allClients || client.get('assignedTo') === user.uid))
+      .map(client => ({ id: client.id, lastActiveAt: Number(client.get('lastActiveAt') || 0) })),
+    serverTime: Date.now(),
+  };
+}
 
 function ledger(tx: Transaction, uid: string, entryId: string, kind: string, availableDelta: number, heldDelta: number, now: number, note: string) {
   tx.create(db.collection('ledger').doc(entryId), { uid, kind, availableDelta, heldDelta, createdAt: now, note });
@@ -215,6 +244,8 @@ async function placeTrade(user: Actor, data: Data) {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
+    const freeze = walletFreeze(Number(balance.get('available') ?? 0), person.data() ?? {});
+    if (freeze.kind === 'amount' && stake > freeze.available) fail('failed-precondition', 'The trade amount exceeds your unfrozen balance.');
     changeFunds(tx, user.uid, balance.data(), -stake, stake);
     tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion, profitPercent: pct });
     ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' trade');
@@ -407,10 +438,12 @@ async function askFunding(user: Actor, data: Data) {
     if (!person.exists) fail('failed-precondition', 'Open the workspace before submitting a request.');
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (kind === 'withdrawal') {
-      if (person.get('freezeAmount')) fail('failed-precondition', 'Withdrawals are frozen for this account.');
+      const freeze = walletFreeze(Number(balance.get('available') ?? 0), person.data() ?? {});
+      if (freeze.kind === 'withdrawals') fail('failed-precondition', 'Withdrawals are frozen for this account.');
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
       const rep = Number(person.get('reputationScore') ?? 100);
       if (rep < 100) fail('failed-precondition', 'Withdrawals require a Reputation Score of at least 100.');
+      if (freeze.kind === 'amount' && amount > freeze.available) fail('failed-precondition', 'The withdrawal amount exceeds your unfrozen balance.');
       const enforcedForm = data.withdrawalPin !== undefined || data.bankDetails !== undefined;
       if (enforcedForm) {
         const storedHash = String(person.get('withdrawalPinHash') || '');
@@ -540,12 +573,52 @@ async function message(user: Actor, data: Data, asStaff: boolean) {
     else if (!client.exists) fail('failed-precondition', 'Open your workspace before sending a message.');
     const ref = db.collection('messages').doc();
     tx.create(ref, { uid: target, sender: asStaff ? 'Support' : 'You', message: content, createdAt: Date.now() });
-    tx.update(client.ref, { supportNeedsReply: !asStaff });
+    if (!asStaff) tx.update(client.ref, { latestSupportMessageId: ref.id });
     return { id: ref.id };
   });
-  await bumpSync({ messagesAt: Date.now() }, asStaff ? [target] : []);
+  await bumpSync({ messagesAt: FieldValue.increment(1) }, asStaff ? [target] : []);
   return result;
 }
+
+const supportReadRef = (staffUid: string, clientUid: string) =>
+  db.collection('staff').doc(staffUid).collection('supportReads').doc(clientUid);
+
+function supportMessageMarker(client?: DocumentData) {
+  return typeof client?.latestSupportMessageId === 'string'
+    ? client.latestSupportMessageId
+    : client?.supportNeedsReply === true ? 'legacy' : null;
+}
+
+async function supportThread(user: Actor, data: Data) {
+  supportRole(user);
+  const uid = identifier(data.uid);
+  const client = (await profile(uid).get()).data();
+  checkScope(user, client);
+  const thread = await page(own('messages', uid), data, ['admin.messages', user.uid, uid]);
+  const marker = supportMessageMarker(client);
+  const containsUnread = marker && thread.rows.some((row: Data) => row.sender === 'You' && (marker === 'legacy' || row.id === marker));
+  if (!containsUnread || (await supportReadRef(user.uid, uid).get()).get('marker') === marker) return thread;
+  return { ...thread, supportUnreadMarker: marker };
+}
+
+async function readSupportMessage(user: Actor, data: Data) {
+  const role = supportRole(user);
+  const uid = identifier(data.uid);
+  const marker = identifier(data.marker);
+  const ref = supportReadRef(user.uid, uid);
+  const { read, changed } = await db.runTransaction(async tx => {
+    await checkStaff(tx, user, role);
+    const [client, receipt] = await Promise.all([tx.get(profile(uid)), tx.get(ref)]);
+    checkScope(user, client.data());
+    if (supportMessageMarker(client.data()) !== marker) return { read: false, changed: false };
+    if (receipt.get('marker') === marker) return { read: true, changed: false };
+    tx.set(ref, { marker });
+    return { read: true, changed: true };
+  });
+  if (changed) await bumpSync({ messagesAt: FieldValue.increment(1) });
+  return { read };
+}
+
 async function updateProfile(user: Actor, data: Data) {
   const rawName = typeof data.name === 'string' ? data.name.trim() : '';
   const rawPass = typeof data.password === 'string' ? data.password.trim() : '';
@@ -701,8 +774,13 @@ async function adminClientUpdate(user: Actor, data: Data) {
   if (typeof data.withdrawalEnabled === 'boolean') updates.withdrawalEnabled = data.withdrawalEnabled;
   if (typeof data.frozen === 'boolean') updates.frozen = data.frozen;
   if (typeof data.freezeAmount === 'boolean') updates.freezeAmount = data.freezeAmount;
-  if (typeof data.frozenAmount === 'number' && Number.isFinite(data.frozenAmount)) {
-    updates.frozenAmount = Math.max(0, Math.round(data.frozenAmount * 100));
+  if (data.frozenAmount !== undefined) {
+    const requested = data.frozenAmount;
+    const amount = typeof requested === 'number' ? Math.round(requested * 100) : NaN;
+    if (typeof requested !== 'number' || !Number.isSafeInteger(amount) || (requested !== 0 && requested < 0.01)) {
+      fail('invalid-argument', 'Enter a valid amount to freeze.');
+    }
+    updates.frozenAmount = amount;
   }
   if (typeof data.currency === 'string' && data.currency.trim()) updates.currency = data.currency.trim().slice(0, 10);
   if (typeof data.tradeMode === 'string' && ['auto', 'win', 'loss'].includes(data.tradeMode.toLowerCase())) {
@@ -748,6 +826,9 @@ async function adminClientUpdate(user: Actor, data: Data) {
     }
     if (updates.freezeAmount !== undefined && Boolean(updates.freezeAmount) !== Boolean(current?.freezeAmount)) {
       changes.push(`Amount freeze ${updates.freezeAmount ? 'enabled' : 'disabled'}`);
+    }
+    if (updates.frozenAmount !== undefined && updates.frozenAmount !== (current?.frozenAmount ?? 0)) {
+      changes.push(`Frozen amount updated to ${(Number(updates.frozenAmount) / 100).toFixed(2)}`);
     }
     if (updates.currency !== undefined && updates.currency !== (current?.currency || 'INR')) {
       changes.push(`Currency updated: ${String(current?.currency || 'INR')} → ${String(updates.currency)}`);
@@ -956,6 +1037,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       return home(user);
     }
     case 'home': return home(user);
+    case 'client.activity': return recordClientActivity(user.uid, data.ageMs);
     case 'trade.place': return placeTrade(user, data);
     case 'funding.request': return askFunding(user, data);
     case 'funding.cancel': return decideFunding(user, data, false);
@@ -1002,10 +1084,11 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       }
       return page(own(list, user.uid), data, [list, user.uid]);
     }
-    case 'admin.access': return { roles: user.staff };
+    case 'admin.access': return { roles: user.staff, serverTime: Date.now() };
     case 'admin.dashboard': return adminOverview(user);
     case 'admin.badges': return adminBadges(user);
     case 'admin.invite.refresh': return adminInviteRefresh(user, data);
+    case 'admin.clients.activity': return adminClientActivity(user, data.uids);
     case 'admin.clients': {
       const rawSearch = text(data.search ?? '', 80, 0).trim();
       const search = rawSearch.replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
@@ -1034,11 +1117,27 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
         rawResult.rows = rawResult.rows.filter((row: Data) => !staffUids.has(String(row.id || '')));
         result = rawResult;
       }
-      // Enrich with wallet balances
+      // Enrich with wallet balances and the signed-in staff member's unread chats.
       const uids = result.rows.map(r => String(r.id));
-      const walletDocs = await Promise.all(uids.map(uid => wallet(uid).get()));
+      const chatEnabled = user.staff.some(role => role === 'admin' || role === 'support');
+      const unreadCandidates = chatEnabled
+        ? result.rows.filter(row => supportMessageMarker(row)).map(row => supportReadRef(user.uid, String(row.id)))
+        : [];
+      const [walletDocs, readDocs] = await Promise.all([
+        Promise.all(uids.map(uid => wallet(uid).get())),
+        unreadCandidates.length ? db.getAll(...unreadCandidates) : [],
+      ]);
       const walletMap = new Map(walletDocs.map(doc => [doc.id, doc.data()]));
-      result.rows = result.rows.map(r => ({ ...r, balance: walletMap.get(String(r.id))?.available ?? 0 }));
+      const readMarkers = new Map(readDocs.map(doc => [doc.id, doc.get('marker')]));
+      result.rows = result.rows.map(row => {
+        const uid = String(row.id);
+        const marker = chatEnabled ? supportMessageMarker(row) : null;
+        return {
+          ...row,
+          balance: walletMap.get(uid)?.available ?? 0,
+          supportUnreadMarker: marker && marker !== readMarkers.get(uid) ? marker : null,
+        };
+      });
       return result;
     }
     case 'admin.depositSettings': return readClientDepositSettings(user, identifier(data.uid));
@@ -1066,12 +1165,8 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       return result;
     }
     case 'admin.client': return clientView(user, data);
-    case 'admin.messages': {
-      supportRole(user);
-      const uid = identifier(data.uid);
-      checkScope(user, (await profile(uid).get()).data());
-      return page(own('messages', uid), data, [op, user.uid, uid]);
-    }
+    case 'admin.messages': return supportThread(user, data);
+    case 'admin.messages.read': return readSupportMessage(user, data);
     case 'admin.client.create': return adminClientCreate(user, data);
     case 'admin.client.update': return adminClientUpdate(user, data);
     case 'admin.notifications.list': return adminNotificationsList(user, data);

@@ -5,10 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <link rel="icon" type="image/png" href="/assets/qoption-logo.png">
+  <link rel="stylesheet" href="/shared/startup.css">
+  <noscript><style>#startup { display: none; }</style></noscript>
   <meta name="description" content="Follow live crypto markets and trade on Qoption.">
   <title>Qoption — Live markets and trading</title>
 </head>
 <body class="home-page">
+  <div id="startup" class="startup-screen" role="status" aria-label="Starting Qoption">
+    <span class="startup-wordmark" aria-hidden="true"><span class="startup-q"><span>Q</span></span>option</span>
+  </div>
   <a class="home-skip" href="#main">Skip to content</a>
   <header class="home-header">
     <div class="home-container home-header-grid">
@@ -24,6 +29,7 @@
         <a href="/register.html" class="home-menu-account">Create account</a>
       </nav>
       <div class="home-header-actions">
+        <a href="#download-app" class="button secondary compact home-download-link">Download app</a>
         <a href="/login.html" class="button secondary compact home-login">Sign in</a>
         <a href="/register.html" class="button home-primary compact">Create account</a>
         <button type="button" class="button secondary compact home-menu-toggle" aria-controls="home-navigation" aria-expanded="false" aria-label="Open menu"><span aria-hidden="true"></span></button>

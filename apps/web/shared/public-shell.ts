@@ -14,7 +14,7 @@ function setMenu(open: boolean) {
 menuToggle.addEventListener('click', () => setMenu(!menu.classList.contains('is-open')));
 document.addEventListener('click', event => {
   const target = event.target as Element;
-  if (target.closest('#home-navigation a') || !target.closest('.home-header')) setMenu(false);
+  if (target.closest('.home-header a') || !target.closest('.home-header')) setMenu(false);
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && menu.classList.contains('is-open')) {
