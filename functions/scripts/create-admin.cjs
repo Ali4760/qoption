@@ -5,7 +5,8 @@ const certPath = 'c:/Users/Ali ishrat/Downloads/qoption-6c226-firebase-adminsdk-
 const cert = require(certPath);
 
 admin.initializeApp({
-  credential: admin.credential.cert(cert)
+  credential: admin.credential.cert(cert),
+  projectId: cert.project_id || 'qoption-6c226'
 });
 
 const auth = admin.auth();
