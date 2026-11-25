@@ -736,3 +736,516 @@
   .admin-shell .admin-client-identity dl { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .admin-shell .admin-client-identity dd + dt { margin-top: 7px; }
 }
+
+/* ─── Page headers & controls (Clients, Withdrawals, Live Trades) ─── */
+.admin-shell .page-header-row,
+.admin-shell .clients-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.admin-shell .page-main-title,
+.admin-shell .clients-title {
+  margin: 0;
+  font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+  font-weight: 700;
+  letter-spacing: -.03em;
+  color: #e8f4ff;
+}
+
+.admin-shell .clients-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-shell .clients-search-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-shell .clients-search-input {
+  min-width: 230px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid #233448;
+  background: #08111d;
+  color: #e2effb;
+  font-size: .88rem;
+}
+
+.admin-shell .icon-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.05rem;
+}
+
+.admin-shell .new-client-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  background: var(--admin-green);
+  border-color: var(--admin-green);
+  color: #05130f;
+  font-weight: 700;
+  border-radius: 9px;
+}
+
+.admin-shell .live-updates-btn {
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: rgba(31, 214, 164, .12);
+  border: 1px solid rgba(31, 214, 164, .35);
+  color: var(--admin-green);
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  cursor: default;
+  opacity: 1;
+}
+
+/* ─── Clients, Withdrawals & Trades table cells ──────────── */
+.admin-shell .client-id-cell {
+  color: var(--admin-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-shell .client-detail-cell {
+  line-height: 1.35;
+}
+
+.admin-shell .client-name {
+  display: block;
+  color: #edf5ff;
+  font-weight: 700;
+  font-size: .9rem;
+}
+
+.admin-shell .client-email {
+  color: #8fa5be;
+  font-size: .79rem;
+}
+
+.admin-shell .client-uid {
+  color: #677f98;
+  font-size: .74rem;
+  font-family: "SFMono-Regular", "Consolas", monospace;
+  margin-top: 2px;
+}
+
+.admin-shell .vip-rep-cell {
+  white-space: nowrap;
+}
+
+.admin-shell .vip-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--admin-green);
+  background: rgba(31, 214, 164, .12);
+  border: 1px solid rgba(31, 214, 164, .30);
+}
+
+.admin-shell .vip-badge.unverified {
+  color: var(--admin-orange);
+  background: rgba(248, 197, 96, .12);
+  border-color: rgba(248, 197, 96, .30);
+}
+
+.admin-shell .rep-score {
+  color: #8fa5be;
+  font-size: .76rem;
+  margin-top: 4px;
+}
+
+.admin-shell .balance-cell {
+  font-weight: 700;
+  color: #e8f4ff;
+  white-space: nowrap;
+}
+
+.admin-shell .status-active,
+.admin-shell .status-inactive,
+.admin-shell .status-frozen,
+.admin-shell .trade-status-win,
+.admin-shell .trade-status-loss,
+.admin-shell .trade-status-open,
+.admin-shell .trade-status-refund {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.admin-shell .status-active,
+.admin-shell .trade-status-win {
+  color: var(--admin-green);
+  background: rgba(31, 214, 164, .12);
+  border: 1px solid rgba(31, 214, 164, .32);
+}
+
+.admin-shell .status-inactive,
+.admin-shell .status-frozen,
+.admin-shell .trade-status-loss {
+  color: var(--admin-red);
+  background: rgba(255, 143, 163, .12);
+  border: 1px solid rgba(255, 143, 163, .30);
+}
+
+.admin-shell .trade-status-open {
+  color: var(--admin-orange);
+  background: rgba(248, 197, 96, .12);
+  border: 1px solid rgba(248, 197, 96, .30);
+}
+
+.admin-shell .trade-status-refund {
+  color: #a9c3db;
+  background: rgba(169, 195, 219, .10);
+  border: 1px solid rgba(169, 195, 219, .24);
+}
+
+.admin-shell .trade-mode-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.admin-shell .trade-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+  transition: all .15s ease;
+}
+
+.admin-shell .trade-pill.trade-auto {
+  color: #9cb4cc;
+  border: 1px solid #354c66;
+}
+.admin-shell .trade-pill.trade-auto.active {
+  background: #c5d6e8;
+  border-color: #c5d6e8;
+  color: #08111d;
+}
+
+.admin-shell .trade-pill.trade-win {
+  color: var(--admin-green);
+  border: 1px solid rgba(31, 214, 164, .45);
+}
+.admin-shell .trade-pill.trade-win.active {
+  background: var(--admin-green);
+  border-color: var(--admin-green);
+  color: #05130f;
+}
+
+.admin-shell .trade-pill.trade-loss {
+  color: #ff6b81;
+  border: 1px solid rgba(255, 107, 129, .45);
+}
+.admin-shell .trade-pill.trade-loss.active {
+  background: #ff4d6d;
+  border-color: #ff4d6d;
+  color: #fff;
+}
+
+.admin-shell .actions-cell,
+.admin-shell .funding-actions-cell {
+  white-space: nowrap;
+}
+
+.admin-shell .icon-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 5px;
+  border-radius: 7px;
+  border: 1px solid #263b52;
+  background: #101e2e;
+  color: #b8cfe5;
+  font-size: .92rem;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.admin-shell .icon-action-btn:hover {
+  background: #182b41;
+  border-color: #3d5d7e;
+  color: #fff;
+}
+
+.admin-shell .icon-action-btn.approve-btn {
+  color: var(--admin-green);
+  border-color: rgba(31, 214, 164, .35);
+  background: rgba(31, 214, 164, .08);
+}
+
+.admin-shell .icon-action-btn.approve-btn:hover {
+  background: var(--admin-green);
+  color: #060b12;
+}
+
+.admin-shell .icon-action-btn.reject-btn {
+  color: var(--admin-red);
+  border-color: rgba(255, 143, 163, .35);
+  background: rgba(255, 143, 163, .08);
+}
+
+.admin-shell .icon-action-btn.reject-btn:hover {
+  background: #ff6b81;
+  border-color: #ff6b81;
+  color: #fff;
+}
+
+/* ─── Edit Client Modal ──────────────────────────────────── */
+.admin-shell ~ dialog:has(.edit-client-grid) {
+  width: min(760px, calc(100vw - 24px));
+  max-width: 760px;
+}
+
+.admin-shell ~ dialog .edit-client-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.admin-shell ~ dialog .edit-client-grid label,
+.admin-shell ~ dialog .currency-section label {
+  font-size: .73rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #93acc6;
+}
+
+.admin-shell ~ dialog .permissions-section,
+.admin-shell ~ dialog .currency-section {
+  background: #0a1421;
+  border: 1px solid #1e3248;
+  border-radius: 10px;
+  padding: 15px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.admin-shell ~ dialog :is(.permissions-section, .currency-section) h3 {
+  margin: 0 0 2px;
+  font-size: .96rem;
+  font-weight: 700;
+  color: #e6f2ff;
+}
+
+.admin-shell ~ dialog .toggle-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  font-size: .88rem;
+  font-weight: 500;
+  color: #dbe9f7;
+  cursor: pointer;
+}
+
+.admin-shell ~ dialog .toggle-row.freeze {
+  color: #ff6b81;
+  font-weight: 700;
+}
+
+.admin-shell ~ dialog .toggle-switch-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.admin-shell ~ dialog .toggle-cb {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.admin-shell ~ dialog .toggle-track {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: #17273a;
+  border: 1px solid #2c435d;
+  position: relative;
+  transition: background .18s ease, border-color .18s ease;
+}
+
+.admin-shell ~ dialog .toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #8fa5be;
+  transition: transform .18s ease, background .18s ease;
+}
+
+.admin-shell ~ dialog .toggle-cb:checked + .toggle-track {
+  background: #1fd6a4;
+  border-color: #1fd6a4;
+}
+
+.admin-shell ~ dialog .toggle-cb:checked + .toggle-track::after {
+  transform: translateX(16px);
+  background: #fff;
+}
+
+.admin-shell ~ dialog .toggle-cb.freeze-cb:checked + .toggle-track {
+  background: #ff4d6d;
+  border-color: #ff4d6d;
+}
+
+.admin-shell ~ dialog .edit-client-footer {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* ─── Manage Balance Modal ───────────────────────────────── */
+.admin-shell ~ dialog .balance-modal-client {
+  text-align: center;
+  margin-bottom: 14px;
+  font-size: .74rem;
+  letter-spacing: .08em;
+  color: #8fa5be;
+}
+
+.admin-shell ~ dialog .balance-modal-client strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1rem;
+  letter-spacing: 0;
+  color: #edf5ff;
+}
+
+.admin-shell ~ dialog .balance-modal-box {
+  background: #0a1421;
+  border: 1px solid #1e3248;
+  border-radius: 10px;
+  padding: 15px;
+  display: grid;
+  gap: 12px;
+}
+
+.admin-shell ~ dialog .balance-type-label {
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #93acc6;
+}
+
+.admin-shell ~ dialog .adj-type-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-shell ~ dialog .adj-btn {
+  min-height: 44px;
+  border-radius: 9px;
+  border: 1px solid #263b52;
+  background: #111d2b;
+  color: #a9c1d9;
+  font-weight: 700;
+  font-size: .88rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.admin-shell ~ dialog .adj-btn.active[data-adj="add"] {
+  background: rgba(31, 214, 164, .12);
+  border-color: #1fd6a4;
+  color: #1fd6a4;
+}
+
+.admin-shell ~ dialog .adj-btn.active[data-adj="deduct"] {
+  background: rgba(255, 107, 129, .12);
+  border-color: #ff6b81;
+  color: #ff6b81;
+}
+
+.admin-shell ~ dialog .amount-with-prefix {
+  display: flex;
+  align-items: stretch;
+  margin-top: 6px;
+}
+
+.admin-shell ~ dialog .amount-prefix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  background: #122133;
+  border: 1px solid #233448;
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  color: #1fd6a4;
+  font-weight: 700;
+}
+
+.admin-shell ~ dialog .amount-with-prefix input {
+  border-radius: 0 8px 8px 0;
+  margin-top: 0;
+}
+
+.admin-shell ~ dialog .balance-modal-footer {
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.admin-shell ~ dialog .approve-submit-btn {
+  background: #1fd6a4;
+  border-color: #1fd6a4;
+  color: #060b12;
+  font-weight: 700;
+}
+
+.admin-shell ~ dialog .reject-submit-btn {
+  background: #ff6b81;
+  border-color: #ff6b81;
+  color: #fff;
+  font-weight: 700;
+}
+
+@media (max-width: 680px) {
+  .admin-shell ~ dialog .edit-client-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .admin-shell .clients-search-input {
+    min-width: 0;
+    flex: 1;
+  }
+}

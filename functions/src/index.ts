@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { FieldPath, getFirestore, type DocumentData, type Query, type Transaction } from 'firebase-admin/firestore';
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
@@ -164,6 +165,7 @@ async function placeTrade(user: Actor, data: Data) {
   const trade = db.collection('trades').doc();
   return mutate(user, data, 'trade.place', [asset.symbol, duration, direction, stake], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
+    if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
     changeFunds(tx, user.uid, balance.data(), -stake, stake);
     tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion: 1, profitPercent });
@@ -177,10 +179,14 @@ async function settle(id: string, now: number) {
   await db.runTransaction(async tx => {
     const trade = (await tx.get(ref)).data();
     if (!trade || trade.status !== 'open' || trade.dueAt > now) return;
-    const balance = (await tx.get(wallet(trade.uid))).data();
+    const [balanceSnap, personSnap] = await Promise.all([tx.get(wallet(trade.uid)), tx.get(profile(trade.uid))]);
+    const balance = balanceSnap.data();
+    const tradeMode = String(personSnap.get('tradeMode') || 'auto').toLowerCase();
     const asset = findAsset(trade.symbol);
     const exit = asset && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
-    const outcome = exit === null || exit === trade.entry ? 'refund'
+    const outcome = tradeMode === 'win' ? 'win'
+      : tradeMode === 'loss' ? 'loss'
+      : exit === null || exit === trade.entry ? 'refund'
       : ((exit > trade.entry) === (trade.direction === 'up') ? 'win' : 'loss');
     const payout = outcome === 'win' ? trade.stake + Math.round(trade.stake * trade.profitPercent / 100) : outcome === 'refund' ? trade.stake : 0;
     changeFunds(tx, trade.uid, balance, payout, -trade.stake);
@@ -205,7 +211,9 @@ async function askFunding(user: Actor, data: Data) {
   return mutate(user, data, 'funding.request', [kind, amount], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (!person.exists) fail('failed-precondition', 'Open the workspace before submitting a request.');
+    if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (kind === 'withdrawal') {
+      if (person.get('freezeAmount')) fail('failed-precondition', 'Withdrawals are frozen for this account.');
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
       changeFunds(tx, user.uid, balance.data(), -amount, amount);
       ledger(tx, user.uid, 'funding_hold_' + ref.id, 'Withdrawal hold', -amount, amount, now, 'Simulated withdrawal');
@@ -221,7 +229,10 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
   if (asStaff) requireRole(user, 'finance');
   if (state !== 'approved' && state !== 'rejected' && state !== 'cancelled') fail('invalid-argument', 'Invalid funding decision.');
   if (asStaff && state === 'cancelled') fail('invalid-argument', 'Choose approve or reject.');
-  const reason = asStaff ? text(data.reason, 240, 3) : 'Cancelled by account owner';
+  const rawReason = typeof data.reason === 'string' ? data.reason.trim() : '';
+  const reason = !asStaff ? 'Cancelled by account owner'
+    : state === 'approved' ? (rawReason ? rawReason.slice(0, 240) : 'Approved')
+    : text(data.reason, 240, 3);
   const now = Date.now();
   return mutate(user, data, 'funding.decide', [id, state, reason], async tx => {
     if (asStaff) await checkStaff(tx, user, 'finance');
@@ -236,7 +247,7 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
     const availableDelta = (request.kind === 'deposit' && state === 'approved') || (request.kind === 'withdrawal' && state !== 'approved') ? request.amount : 0;
     changeFunds(tx, request.uid, balance, availableDelta, heldDelta);
     tx.update(ref, { status: state, reason, decidedAt: now });
-    ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, 'Simulated transfer');
+    ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, reason);
     if (asStaff) audit(tx, user, request.uid, request.kind + ' ' + state, reason, now);
     return { id, status: state };
   });
@@ -339,8 +350,11 @@ async function adminUpdate(user: Actor, data: Data, adjusting: boolean) {
   const role = adjusting ? 'finance' : 'admin';
   requireRole(user, role);
   const uid = identifier(data.uid);
-  const reason = text(data.reason, 240, 3);
   const delta = adjusting ? cents(data.amount, true) : 0;
+  const rawReason = typeof data.reason === 'string' ? data.reason.trim() : '';
+  const reason = adjusting
+    ? (rawReason ? rawReason.slice(0, 240) : (delta > 0 ? 'Funds added by admin' : 'Funds deducted by admin'))
+    : text(data.reason, 240, 3);
   const tradeEnabled = data.tradeEnabled === true, withdrawalEnabled = data.withdrawalEnabled === true;
   if (!adjusting && (typeof data.tradeEnabled !== 'boolean' || typeof data.withdrawalEnabled !== 'boolean')) fail('invalid-argument', 'Invalid restriction.');
   return mutate(user, data, adjusting ? 'admin.adjust' : 'admin.restrict', [uid, reason, delta, tradeEnabled, withdrawalEnabled], async tx => {
@@ -356,11 +370,113 @@ async function adminUpdate(user: Actor, data: Data, adjusting: boolean) {
   });
 }
 
+async function adminClientUpdate(user: Actor, data: Data) {
+  requireRole(user, 'admin');
+  const uid = identifier(data.uid);
+  const reason = 'Admin client update';
+  const updates: Record<string, unknown> = {};
+  if (typeof data.name === 'string' && data.name.trim()) {
+    updates.name = data.name.trim().slice(0, 60);
+    updates.nameSearch = String(updates.name).toLowerCase();
+  }
+  if (typeof data.vipLevel === 'string' && data.vipLevel.trim()) updates.vipLevel = data.vipLevel.trim().slice(0, 20);
+  if (typeof data.reputationScore === 'number' && Number.isFinite(data.reputationScore)) {
+    updates.reputationScore = Math.max(0, Math.min(1000, Math.round(data.reputationScore)));
+  }
+  if (typeof data.tradeEnabled === 'boolean') updates.tradeEnabled = data.tradeEnabled;
+  if (typeof data.withdrawalEnabled === 'boolean') updates.withdrawalEnabled = data.withdrawalEnabled;
+  if (typeof data.frozen === 'boolean') updates.frozen = data.frozen;
+  if (typeof data.freezeAmount === 'boolean') updates.freezeAmount = data.freezeAmount;
+  if (typeof data.frozenAmount === 'number' && Number.isFinite(data.frozenAmount)) {
+    updates.frozenAmount = Math.max(0, Math.round(data.frozenAmount * 100));
+  }
+  if (typeof data.currency === 'string' && data.currency.trim()) updates.currency = data.currency.trim().slice(0, 10);
+  if (typeof data.tradeMode === 'string' && ['auto', 'win', 'loss'].includes(data.tradeMode.toLowerCase())) {
+    updates.tradeMode = data.tradeMode.toLowerCase();
+  }
+  if (typeof data.withdrawalPin === 'string' && data.withdrawalPin.trim()) {
+    updates.withdrawalPinHash = digest(data.withdrawalPin.trim());
+  }
+  const newPassword = typeof data.password === 'string' && data.password.trim() ? data.password.trim() : '';
+  if (newPassword && newPassword.length < 6) fail('invalid-argument', 'Login password must be at least 6 characters.');
+  if (!Object.keys(updates).length && !newPassword) fail('invalid-argument', 'No fields to update.');
+
+  if (newPassword) {
+    const targetDoc = (await profile(uid).get()).data();
+    checkScope(user, targetDoc);
+    await getAuth().updateUser(uid, { password: newPassword });
+  }
+
+  return mutate(user, data, 'admin.client.update', [uid, updates, Boolean(newPassword)], async tx => {
+    await checkStaff(tx, user, 'admin');
+    checkScope(user, (await tx.get(profile(uid))).data());
+    if (Object.keys(updates).length) tx.update(profile(uid), updates);
+    audit(tx, user, uid, 'Profile updated', reason, Date.now());
+    return { uid };
+  });
+}
+
+async function adminClientCreate(user: Actor, data: Data) {
+  requireRole(user, 'admin');
+  const name = text(data.name, 60, 2);
+  const email = text(data.email, 120, 5).toLowerCase();
+  const password = text(data.password, 128, 6);
+  const vipLevel = typeof data.vipLevel === 'string' && data.vipLevel.trim() ? data.vipLevel.trim().slice(0, 20) : 'Unverified';
+  const reputationScore = typeof data.reputationScore === 'number' && Number.isFinite(data.reputationScore)
+    ? Math.max(0, Math.min(1000, Math.round(data.reputationScore))) : 100;
+  const tradeEnabled = data.tradeEnabled !== false;
+  const withdrawalEnabled = data.withdrawalEnabled !== false;
+  const frozen = data.frozen === true;
+  const created = await getAuth().createUser({ email, password, displayName: name });
+  const now = Date.now();
+  await db.runTransaction(async tx => {
+    await checkStaff(tx, user, 'admin');
+    tx.create(profile(created.uid), {
+      uid: created.uid,
+      email,
+      name,
+      nameSearch: name.toLowerCase(),
+      invitation_code: '',
+      createdAt: now,
+      tradeEnabled,
+      withdrawalEnabled,
+      frozen,
+      freezeAmount: false,
+      vipLevel,
+      reputationScore,
+      tradeMode: 'auto',
+      assignedTo: user.allClients ? '' : user.uid,
+    });
+    tx.create(wallet(created.uid), { available: openingAmount, held: 0 });
+    ledger(tx, created.uid, 'opening_' + created.uid, 'Opening balance', openingAmount, 0, now, 'Practice trading credit');
+    audit(tx, user, created.uid, 'Client created', 'Created by admin', now);
+  });
+  return { uid: created.uid };
+}
+
+async function enrichWithProfiles(rows: Data[], db: ReturnType<typeof getFirestore>) {
+  const uids = [...new Set(rows.map(r => String(r.uid || '')).filter(Boolean))];
+  if (!uids.length) return rows;
+  const chunks: string[][] = [];
+  for (let i = 0; i < uids.length; i += 10) chunks.push(uids.slice(i, i + 10));
+  const profileMap = new Map<string, { name: string; email: string }>();
+  for (const chunk of chunks) {
+    const docs = await Promise.all(chunk.map(uid => db.collection('profiles').doc(uid).get()));
+    for (const doc of docs) {
+      if (doc.exists) profileMap.set(doc.id, { name: String(doc.get('name') || ''), email: String(doc.get('email') || '') });
+    }
+  }
+  return rows.map(r => {
+    const p = profileMap.get(String(r.uid || ''));
+    return p ? { ...r, clientName: p.name, clientEmail: p.email } : r;
+  });
+}
+
 export const workspace = onCall({ region, enforceAppCheck: local ? false : requireAppCheck, maxInstances: 8 }, async request => {
   const data = record(request.data);
   const op = text(data.op, 64);
   const user = await actor(request, op.startsWith('admin.'));
-  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send'].includes(op);
+  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create'].includes(op);
   if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
   }
@@ -395,7 +511,13 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       const search = text(data.search ?? '', 50, 0).toLowerCase();
       let query = await staffQuery(user, 'profiles');
       if (search) query = query.where('nameSearch', '>=', search).where('nameSearch', '<=', search + '\uF8FF');
-      return page(query, data, [op, user.uid, search], search ? 'nameSearch' : 'createdAt', !!search);
+      const result = await page(query, data, [op, user.uid, search], search ? 'nameSearch' : 'createdAt', !!search);
+      // Enrich with wallet balances
+      const uids = result.rows.map(r => String(r.id));
+      const walletDocs = await Promise.all(uids.map(uid => wallet(uid).get()));
+      const walletMap = new Map(walletDocs.map(doc => [doc.id, doc.data()]));
+      result.rows = result.rows.map(r => ({ ...r, balance: walletMap.get(String(r.id))?.available ?? 0 }));
+      return result;
     }
     case 'admin.funding': {
       requireRole(user, 'finance');
@@ -403,11 +525,16 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       if ((kind !== 'deposit' && kind !== 'withdrawal') || !['pending', 'approved', 'rejected', 'cancelled', 'all'].includes(String(status))) fail('invalid-argument', 'Invalid filter.');
       let query = (await staffQuery(user, 'funding')).where('kind', '==', kind);
       if (status !== 'all') query = query.where('status', '==', status);
-      return page(query, data, [op, user.uid, kind, status]);
+      const result = await page(query, data, [op, user.uid, kind, status]);
+      result.rows = await enrichWithProfiles(result.rows, db) as typeof result.rows;
+      return result;
     }
-    case 'admin.trades':
+    case 'admin.trades': {
       requireRole(user, 'admin');
-      return page(await staffQuery(user, 'trades'), data, [op, user.uid]);
+      const result = await page(await staffQuery(user, 'trades'), data, [op, user.uid]);
+      result.rows = await enrichWithProfiles(result.rows, db) as typeof result.rows;
+      return result;
+    }
     case 'admin.audit':
       requireRole(user, 'admin');
       return page(await staffQuery(user, 'audit'), data, [op, user.uid]);
@@ -418,6 +545,8 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       checkScope(user, (await profile(uid).get()).data());
       return page(own('messages', uid), data, [op, user.uid, uid]);
     }
+    case 'admin.client.create': return adminClientCreate(user, data);
+    case 'admin.client.update': return adminClientUpdate(user, data);
     case 'admin.funding.decide': return decideFunding(user, data, true);
     case 'admin.client.restrict': return adminUpdate(user, data, false);
     case 'admin.client.adjust': return adminUpdate(user, data, true);

@@ -11,9 +11,9 @@ export const userNavGroups = [
 ];
 export const userNav = userNavGroups.flatMap(group => group.links);
 export const adminNavGroups = [
-  { name: 'Overview', links: [['overview', '◈', 'Dashboard', ''], ['clients', '◉', 'Clients', '']] },
+  { name: 'Overview', links: [['overview', '◈', 'Dashboard', ''], ['clients', '◉', 'My Clients', '']] },
   { name: 'Operations', links: [['deposits', '↓', 'Deposits', 'finance'], ['withdrawals', '↑', 'Withdrawals', 'finance'],
-    ['trades', '⟳', 'Trade activity', 'admin']] },
+    ['trades', '⟳', 'Live Trades', 'admin']] },
   { name: 'Records', links: [['audit', '◧', 'Audit log', 'admin']] },
 ];
 export const adminNav = adminNavGroups.flatMap(group => group.links);

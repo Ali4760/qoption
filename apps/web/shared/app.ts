@@ -217,7 +217,8 @@ async function renderUser(run: number) {
     const readAt = home.profile.notificationReadAt ?? 0;
     const controls = '<div class="filters"><form data-form="notifications.read"><button class="button secondary">Mark all as read</button>' + formStatus() + '</form></div>';
     const activity = table(['Update', 'Available change', 'Date', 'Status'], rows.map(row => [
-      esc(label(row.kind)), credits(row.availableDelta), dateTime(row.createdAt),
+      '<strong>' + esc(label(row.kind)) + '</strong>' + (row.note ? '<div class="quiet" style="font-size:.8rem;margin-top:2px">' + esc(row.note) + '</div>' : ''),
+      credits(row.availableDelta), dateTime(row.createdAt),
       state(Number(row.createdAt) > readAt ? 'new' : 'read'),
     ]), 'No updates yet');
     return title('Notifications', 'Trade results and wallet updates.') + section('Account activity', controls + activity + navigation());
@@ -292,28 +293,138 @@ async function renderAdmin(run: number) {
   if (route === 'client') return renderClient(run);
   if (route === 'clients') {
     const search = list().search, rows = await getPage(run, 'admin.clients', { search });
-    return title('Clients', 'Browse accounts within your staff scope.') + section('Client directory',
-      '<form class="filters" data-form="search"><label>Client name<input name="search" maxlength="50" value="' + esc(search) +
-      '" placeholder="Search by name prefix"></label><button class="button secondary">Search</button></form>' +
-      table(['Client', 'Email', 'Invite Code', 'Trading', 'Withdrawals', ''], rows.map(row => [esc(row.name), esc(row.email),
-        '<code class="admin-code">' + esc(row.invitation_code || '—') + '</code>',
-        state(row.tradeEnabled ? 'enabled' : 'paused'),
-        state(row.withdrawalEnabled ? 'enabled' : 'paused'), actionButton('client', row.id, 'Open')]), 'No clients found') + navigation());
+    // ID counter starting from 1000 descending by index
+    const startId = 1000 + rows.length;
+    return '<div class="clients-page-header"><h1 class="clients-title">My Clients</h1>' +
+      '<div class="clients-controls">' +
+      '<form class="clients-search-form" data-form="search">' +
+      '<input name="search" class="clients-search-input" maxlength="50" value="' + esc(search) + '" placeholder="Search UID, Name or Email">' +
+      '<button type="button" class="button secondary compact icon-btn" data-action="reload" title="Refresh">↻</button>' +
+      '</form>' +
+      '<button type="button" class="button new-client-btn" data-action="new-client">＋ New</button>' +
+      '</div></div>' +
+      '<section class="panel">' +
+      '<div class="table-wrap"><table>' +
+      '<thead><tr><th>ID</th><th>CLIENT DETAILS</th><th>VIP / REP</th><th>BALANCE</th><th>STATUS</th><th>TRADE MODE</th><th>ACTIONS</th></tr></thead>' +
+      '<tbody>' + rows.map((row, i) => {
+        const isFrozen = row.frozen === true;
+        const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
+        const uid = String(row.id || '');
+        const shortUid = uid.slice(0, 8);
+        const displayId = '#' + (startId - i);
+        const vip = String(row.vipLevel || 'VIP1');
+        const vipUnverified = vip.toLowerCase() === 'unverified';
+        const rep = Number(row.reputationScore ?? 100);
+        const balance = Number(row.balance ?? 0);
+        const mode = String(row.tradeMode || 'auto').toLowerCase();
+        return '<tr' + (isFrozen ? ' style="opacity:0.75"' : '') + '>' +
+          '<td class="client-id-cell">' + esc(displayId) + '</td>' +
+          '<td class="client-detail-cell">' +
+            '<strong class="client-name">' + esc(String(row.name || '')) + '</strong>' +
+            '<div class="client-email">' + esc(String(row.email || '')) + '</div>' +
+            '<div class="client-uid">UID: ' + esc(shortUid) + '</div>' +
+          '</td>' +
+          '<td class="vip-rep-cell">' +
+            '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vip.toUpperCase()) + '</span>' +
+            '<div class="rep-score">Rep: ' + rep + '</div>' +
+          '</td>' +
+          '<td class="balance-cell">₹' + credits(balance) + '</td>' +
+          '<td>' + (isFrozen ? '<span class="status-frozen">FROZEN</span>' : isActive ? '<span class="status-active">ACTIVE</span>' : '<span class="status-inactive">SUSPENDED</span>') + '</td>' +
+          '<td class="trade-mode-cell"><div class="trade-mode-group">' +
+            '<button type="button" class="trade-pill trade-auto' + (mode === 'auto' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="auto">Auto</button>' +
+            '<button type="button" class="trade-pill trade-win' + (mode === 'win' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="win">Win</button>' +
+            '<button type="button" class="trade-pill trade-loss' + (mode === 'loss' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="loss">Loss</button>' +
+          '</div></td>' +
+          '<td class="actions-cell">' +
+            '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">◧</button>' +
+            '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">▣</button>' +
+            '<button type="button" class="icon-action-btn" data-action="client-messages-modal" data-id="' + esc(uid) + '" title="Messages">▤</button>' +
+            '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">✎</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No clients found</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
+      navigation() + '</section>';
   }
-  const refresh = '<button class="button secondary" data-action="reload">Refresh</button>';
+  const refresh = '<button class="button secondary compact" data-action="reload">↻ Refresh</button>';
   if (route === 'deposits' || route === 'withdrawals') {
+    const isWithdrawal = route === 'withdrawals';
     const status = list().status;
-    const name = routeName();
-    const rows = await getPage(run, 'admin.funding', { kind: route === 'deposits' ? 'deposit' : 'withdrawal', status });
-    return title(name, 'Review simulated funding requests.') + section(name + ' queue',
+    const rows = await getPage(run, 'admin.funding', { kind: isWithdrawal ? 'withdrawal' : 'deposit', status });
+    if (isWithdrawal) {
+      return '<div class="page-header-row"><h1 class="page-main-title">Withdrawal History</h1>' + refresh + '</div>' +
+        '<section class="panel">' +
+        '<div class="filters">' +
+        '<label>Status<select id="funding-status">' + ['pending', 'approved', 'rejected', 'cancelled', 'all'].map(value =>
+          '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
+        '</div>' +
+        '<div class="table-wrap"><table>' +
+        '<thead><tr><th>ID</th><th>CLIENT</th><th>AMOUNT</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>' +
+        '<tbody>' + rows.map((row, i) => {
+          const fundId = '#' + (2000 + rows.length - i);
+          const clientName = String(row.clientName || recordReference(row.uid));
+          const clientEmail = String(row.clientEmail || '');
+          const statusVal = String(row.status || 'pending');
+          return '<tr>' +
+            '<td class="client-id-cell">' + esc(fundId) + '</td>' +
+            '<td class="client-detail-cell">' +
+              '<strong class="client-name">' + esc(clientName) + '</strong>' +
+              (clientEmail ? '<div class="client-email">' + esc(clientEmail) + '</div>' : '') +
+            '</td>' +
+            '<td>₹' + credits(row.amount) + '</td>' +
+            '<td>' + dateTime(row.createdAt) + '</td>' +
+            '<td>' + state(statusVal) + '</td>' +
+            '<td class="funding-actions-cell">' +
+              '<button type="button" class="icon-action-btn" data-action="funding-detail" data-id="' + esc(row.id) + '" title="View details">👁</button>' +
+              (statusVal === 'pending' ? '<button type="button" class="icon-action-btn approve-btn" data-action="approve-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Approve">✓</button>' : '') +
+              (statusVal === 'pending' ? '<button type="button" class="icon-action-btn reject-btn" data-action="reject-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Reject">✗</button>' : '') +
+            '</td>' +
+          '</tr>';
+        }).join('') +
+        '</tbody></table></div>' +
+        (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No withdrawal requests</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
+        navigation() + '</section>';
+    }
+    return title(routeName(), 'Review simulated funding requests.') + section(routeName() + ' queue',
       '<div class="filters"><label>Status<select id="funding-status">' + ['pending', 'approved', 'rejected', 'cancelled', 'all'].map(value =>
         '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
       refresh + '</div>' + fundingRows(rows, true) + navigation());
   }
   if (route === 'trades') {
     const rows = await getPage(run, 'admin.trades');
-    return title('Trade activity', 'Review recent activity from the simulated order engine.') +
-      section('Recent trades', '<div class="filters">' + refresh + '</div>' + tradeRows(rows, true) + navigation());
+    return '<div class="page-header-row">' +
+      '<h1 class="page-main-title">Live Trades</h1>' +
+      '<button class="button live-updates-btn" type="button" disabled>⬤ LIVE UPDATES</button>' +
+      '</div>' +
+      '<section class="panel">' +
+      '<div class="table-wrap"><table>' +
+      '<thead><tr><th>ID</th><th>CLIENT</th><th>ASSET</th><th>DIRECTION</th><th>AMOUNT</th><th>TIMEFRAME</th><th>STATUS</th></tr></thead>' +
+      '<tbody>' + rows.map((row, i) => {
+        const tradeId = '#' + (4000 + rows.length - i);
+        const clientName = String(row.clientName || recordReference(row.uid));
+        const dueAt = Number(row.dueAt);
+        const createdAt = Number(row.createdAt);
+        const secs = dueAt && createdAt ? Math.max(1, Math.round((dueAt - createdAt) / 1000)) : Number(row.duration || 60);
+        const timeframeText = secs >= 60 && secs % 60 === 0 ? (secs / 60) + ' min' : secs + ' sec';
+        const outcome = String(row.outcome || row.status || 'open').toLowerCase();
+        const badge = outcome === 'win' ? '<span class="trade-status-win">WIN</span>'
+          : outcome === 'loss' ? '<span class="trade-status-loss">LOSS</span>'
+          : outcome === 'refund' ? '<span class="trade-status-refund">REFUND</span>'
+          : '<span class="trade-status-open">OPEN</span>';
+        return '<tr>' +
+          '<td class="client-id-cell">' + esc(tradeId) + '</td>' +
+          '<td><strong>' + esc(clientName) + '</strong></td>' +
+          '<td>' + pair(row.symbol) + '</td>' +
+          '<td>' + esc(String(row.direction || '').toUpperCase()) + '</td>' +
+          '<td>₹' + credits(row.stake) + '</td>' +
+          '<td>' + esc(timeframeText) + '</td>' +
+          '<td>' + badge + '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table></div>' +
+      (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No trades yet</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
+      navigation() + '</section>';
   }
   const rows = await getPage(run, 'admin.audit');
   return title('Audit log', 'Staff actions recorded by the server.') + section('Audit events', table(['Event', 'Client ID', 'Staff ID', 'Reason', 'Date'],
@@ -357,7 +468,7 @@ async function render() {
           if (run === version && !panel().open && !content().contains(document.activeElement)) content().innerHTML = html;
         } catch { /* Retain the current view on a refresh failure. */ }
         finally { refreshing = false; }
-      }, 15000);
+      }, route === 'trades' ? 3000 : 15000);
     }
   } catch (error) {
     if (run === version) content().innerHTML = title(routeName(), errorMessage(error)) + '<button class="button secondary" data-action="reload">Try again</button>';
@@ -521,6 +632,170 @@ root.addEventListener('click', async event => {
       case 'previous': if (list().page > 0) { list().page--; await render(); } break;
       case 'restrictions': case 'adjustment': clientAction(action, id); break;
       case 'trade-detail': case 'funding-detail': case 'review-funding': { const row = visibleRows.get(id); if (row) details(action, row); break; }
+      case 'approve-funding': {
+        const clientName = target.dataset.name || id;
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Approve Withdrawal</h2>' +
+          '<p style="color:#8fa5be;margin-bottom:14px">Approving withdrawal for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
+          '<form class="stack" data-form="admin.funding.decide">' +
+          '<input type="hidden" name="id" value="' + esc(id) + '">' +
+          '<input type="hidden" name="status" value="approved">' +
+          '<label>Remark (optional)<input name="reason" maxlength="240" placeholder="Optional remark" value="Withdrawal approved"></label>' +
+          '<div class="button-row"><button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
+          '<button class="button approve-submit-btn">✓ Approve</button></div>' +
+          formStatus() + '</form>';
+        if (!box.open) box.showModal();
+        break;
+      }
+      case 'reject-funding': {
+        const clientName = target.dataset.name || id;
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Reject Withdrawal</h2>' +
+          '<p style="color:#8fa5be;margin-bottom:14px">Rejecting withdrawal for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
+          '<form class="stack" data-form="admin.funding.decide">' +
+          '<input type="hidden" name="id" value="' + esc(id) + '">' +
+          '<input type="hidden" name="status" value="rejected">' +
+          '<label>Reason for rejection <span style="color:#ff8fa3">*</span><input name="reason" minlength="3" maxlength="240" placeholder="Explain why this withdrawal is rejected" required></label>' +
+          '<div class="button-row"><button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
+          '<button class="button reject-submit-btn">✗ Reject</button></div>' +
+          formStatus() + '</form>';
+        if (!box.open) box.showModal();
+        break;
+      }
+      case 'balance-modal': {
+        const clientName = target.dataset.name || 'Client';
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Manage Balance</h2>' +
+          '<div class="balance-modal-client">ADJUST WALLET<br><strong>' + esc(clientName) + '</strong></div>' +
+          '<form class="stack" data-form="admin.client.adjust">' +
+          '<input type="hidden" name="uid" value="' + esc(id) + '">' +
+          '<input type="hidden" name="adjSign" value="1">' +
+          '<div class="balance-modal-box">' +
+          '<div class="balance-type-label">ADJUSTMENT TYPE</div>' +
+          '<div class="adj-type-toggle">' +
+          '<button type="button" class="adj-btn active" data-action="adj-type" data-adj="add">⊕ Add funds</button>' +
+          '<button type="button" class="adj-btn" data-action="adj-type" data-adj="deduct">⊖ Deduct</button>' +
+          '</div>' +
+          '<label>AMOUNT<div class="amount-with-prefix"><span class="amount-prefix">₹</span>' +
+          '<input name="amount" type="number" step=".01" min=".01" max="100000" placeholder="Enter amount" required></div></label>' +
+          '<label>NOTE<textarea name="reason" placeholder="Optional note for the audit trail" maxlength="240" style="min-height:70px"></textarea></label>' +
+          '</div>' +
+          '<div class="button-row balance-modal-footer"><button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
+          '<button class="button">✓ Update balance</button></div>' +
+          formStatus() + '</form>';
+        if (!box.open) box.showModal();
+        break;
+      }
+      case 'edit-client': {
+        const row = visibleRows.get(id);
+        if (!row) { toast('Client data not loaded. Try refreshing.'); break; }
+        const vipVal = String(row.vipLevel || 'VIP1');
+        const vipOptions: [string, string][] = [
+          ['Unverified', 'Unverified'],
+          ['VIP1', 'VIP Level 1'],
+          ['VIP2', 'VIP Level 2'],
+          ['VIP3', 'VIP Level 3'],
+          ['VIP4', 'VIP Level 4'],
+          ['VIP5', 'VIP Level 5'],
+        ];
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Edit Client: ' + esc(String(row.name || '')) + '</h2>' +
+          '<form class="stack" data-form="admin.client.update">' +
+          '<input type="hidden" name="uid" value="' + esc(id) + '">' +
+          '<div class="edit-client-grid">' +
+          '<label>FULL NAME<input name="name" value="' + esc(String(row.name || '')) + '" maxlength="60" required></label>' +
+          '<label>EMAIL ADDRESS<input name="email" type="email" value="' + esc(String(row.email || '')) + '" readonly style="opacity:.65"></label>' +
+          '<label>LOGIN PASSWORD<input name="password" type="password" minlength="6" placeholder="Leave blank to keep current" autocomplete="new-password"></label>' +
+          '<label>WITHDRAWAL PIN<input name="withdrawalPin" type="text" placeholder="Leave blank to keep current"></label>' +
+          '<label>VIP LEVEL<select name="vipLevel">' +
+          vipOptions.map(([val, text]) =>
+            '<option value="' + esc(val) + '"' + (vipVal.toUpperCase() === val.toUpperCase() ? ' selected' : '') + '>' + esc(text) + '</option>').join('') +
+          '</select></label>' +
+          '<label>REPUTATION SCORE<input name="reputationScore" type="number" min="0" max="1000" value="' + Number(row.reputationScore ?? 100) + '"></label>' +
+          '</div>' +
+          '<div class="permissions-section"><h3>Permissions &amp; Security</h3>' +
+          '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="tradeEnabled" class="toggle-cb"' + (row.tradeEnabled ? ' checked' : '') + '><span class="toggle-track"></span></span>Allow Trading</label>' +
+          '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="withdrawalEnabled" class="toggle-cb"' + (row.withdrawalEnabled ? ' checked' : '') + '><span class="toggle-track"></span></span>Allow Withdrawals</label>' +
+          '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="frozen" class="toggle-cb freeze-cb"' + (row.frozen ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE ACCOUNT <span class="freeze-note">(Restrict All Access)</span></label>' +
+          '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="freezeAmount" class="toggle-cb freeze-cb"' + (row.freezeAmount ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE AMOUNT <span class="freeze-note">(Restrict Withdrawals)</span></label>' +
+          '</div>' +
+          '<div class="currency-section"><h3>Client currency</h3>' +
+          '<label>CURRENCY OVERRIDE<select name="currency">' +
+          [['INR','₹','Indian Rupee'],['USD','$','US Dollar'],['EUR','€','Euro'],['GBP','£','British Pound'],['AED','د.إ','UAE Dirham']].map(([code, sym, name]) =>
+            '<option value="' + code + '"' + (String(row.currency || 'INR') === code ? ' selected' : '') + '>' + code + ' (' + sym + ') - ' + name + '</option>').join('') +
+          '</select></label>' +
+          '<label>CURRENCY-CHANGE PASSWORD<input name="currencyPassword" type="password" autocomplete="new-password" placeholder="Required for this client\'s currency change"></label>' +
+          '<div class="button-row" style="margin-top:8px">' +
+          '<button type="button" class="button" data-action="save-client-currency" style="font-size:.82rem;min-height:34px;padding:4px 12px">Save currency</button>' +
+          '<button type="button" class="button secondary" data-action="default-client-currency" style="font-size:.82rem;min-height:34px;padding:4px 12px">Use admin default</button>' +
+          '</div></div>' +
+          '<div class="button-row edit-client-footer">' +
+          '<button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
+          '<button class="button">Save Client</button></div>' +
+          formStatus() + '</form>';
+        if (!box.open) box.showModal();
+        break;
+      }
+      case 'save-client-currency':
+      case 'default-client-currency': {
+        const form = target.closest('form');
+        const uid = form?.querySelector<HTMLInputElement>('input[name="uid"]')?.value || '';
+        const select = form?.querySelector<HTMLSelectElement>('select[name="currency"]');
+        const currency = action === 'default-client-currency' ? 'INR' : (select?.value || 'INR');
+        if (!uid) break;
+        if (select && action === 'default-client-currency') select.value = 'INR';
+        await api.call('admin.client.update', { uid, currency, requestId: crypto.randomUUID() });
+        toast(action === 'default-client-currency' ? 'Client currency reset to admin default (INR).' : 'Client currency updated to ' + currency + '.');
+        await render();
+        break;
+      }
+      case 'trade-mode': {
+        const mode = target.dataset.mode || 'auto';
+        const group = target.closest('.trade-mode-group');
+        if (group) {
+          for (const btn of group.querySelectorAll('.trade-pill')) btn.classList.remove('active');
+          target.classList.add('active');
+        }
+        await api.call('admin.client.update', { uid: id, tradeMode: mode, requestId: crypto.randomUUID() });
+        toast('Trade mode set to ' + mode.toUpperCase() + '.');
+        break;
+      }
+      case 'client-messages-modal': clientSection = 'messages'; go('client/' + encodeURIComponent(id)); break;
+      case 'new-client': {
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Register New Client</h2>' +
+          '<form class="stack" data-form="admin.client.create">' +
+          '<div class="edit-client-grid">' +
+          '<label>FULL NAME<input name="name" minlength="2" maxlength="60" required></label>' +
+          '<label>EMAIL ADDRESS<input name="email" type="email" required></label>' +
+          '<label>LOGIN PASSWORD<input name="password" type="password" minlength="6" required autocomplete="new-password"></label>' +
+          '<label>VIP LEVEL<select name="vipLevel">' +
+          [['Unverified','Unverified'],['VIP1','VIP Level 1'],['VIP2','VIP Level 2'],['VIP3','VIP Level 3']].map(([val, text]) =>
+            '<option value="' + val + '">' + text + '</option>').join('') +
+          '</select></label>' +
+          '<label>REPUTATION SCORE<input name="reputationScore" type="number" min="0" max="1000" value="100"></label>' +
+          '</div>' +
+          '<div class="permissions-section"><h3>Permissions &amp; Security</h3>' +
+          '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="tradeEnabled" class="toggle-cb" checked><span class="toggle-track"></span></span>Allow Trading</label>' +
+          '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="withdrawalEnabled" class="toggle-cb" checked><span class="toggle-track"></span></span>Allow Withdrawals</label>' +
+          '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="frozen" class="toggle-cb freeze-cb"><span class="toggle-track"></span></span>FREEZE ACCOUNT <span class="freeze-note">(Restrict All Access)</span></label>' +
+          '</div>' +
+          '<div class="button-row edit-client-footer">' +
+          '<button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
+          '<button class="button">Create Client</button></div>' +
+          formStatus() + '</form>';
+        if (!box.open) box.showModal();
+        break;
+      }
+      case 'adj-type': {
+        const form = target.closest('form');
+        if (!form) break;
+        for (const btn of form.querySelectorAll<HTMLButtonElement>('.adj-btn')) btn.classList.remove('active');
+        target.classList.add('active');
+        const signInput = form.querySelector<HTMLInputElement>('input[name="adjSign"]');
+        if (signInput) signInput.value = target.dataset.adj === 'deduct' ? '-1' : '1';
+        break;
+      }
     }
   } catch (error) {
     if (action === 'quick-start') authNotice('Start the emulators and run npm run seed to open the practice workspace.');
@@ -596,9 +871,22 @@ root.addEventListener('submit', async event => {
     if (await accountForm(op, values, form)) return;
     if (op === 'search') { list().search = String(values.search || ''); resetList(); await render(); return; }
     const params: Record<string, unknown> = { ...values, requestId: form.dataset.operationId ||= crypto.randomUUID() };
-    if ('amount' in params) params.amount = cents(params.amount);
+    if ('amount' in params) params.amount = cents(params.amount) * Number(values.adjSign || 1);
+    delete params.adjSign;
     if ('duration' in params) params.duration = Number(params.duration);
     if (op === 'admin.client.restrict') { params.tradeEnabled = values.tradeEnabled === 'on'; params.withdrawalEnabled = values.withdrawalEnabled === 'on'; }
+    if (op === 'admin.client.update' || op === 'admin.client.create') {
+      params.tradeEnabled = values.tradeEnabled === 'on';
+      params.withdrawalEnabled = values.withdrawalEnabled === 'on';
+      params.frozen = values.frozen === 'on';
+      if (op === 'admin.client.update') params.freezeAmount = values.freezeAmount === 'on';
+      if (values.reputationScore !== undefined && String(values.reputationScore).trim() !== '') params.reputationScore = Number(values.reputationScore);
+      if (!String(values.password || '').trim()) delete params.password;
+      if (!String(values.withdrawalPin || '').trim()) delete params.withdrawalPin;
+      delete params.currencyPassword;
+      delete params.email;
+      if (op === 'admin.client.create') params.email = values.email;
+    }
     await api.call(op, params);
     if (started !== version) return;
     panel().close(); delete form.dataset.operationId;
