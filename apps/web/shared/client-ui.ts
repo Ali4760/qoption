@@ -592,8 +592,14 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
           <button type="button" class="autofill-btn" data-action="client-autofill-bank">Auto-Fill</button>
         </div>
 
-        ${!home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount
-          ? '<p class="error" style="margin:0 0 12px;font-weight:700;font-size:13px;">Withdrawals are currently restricted for this account.</p>' : ''}
+        ${(() => {
+          const rep = Number(home.profile.reputationScore ?? 100);
+          const lowRep = rep < 100;
+          const restricted = !home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount;
+          if (restricted) return '<p class="error" style="margin:0 0 12px;font-weight:700;font-size:13px;">Withdrawals are currently restricted for this account.</p>';
+          if (lowRep) return `<p class="error" style="margin:0 0 12px;font-weight:700;font-size:13px;">Withdrawals are blocked: Reputation Score must be at least 100 (current: ${rep}).</p>`;
+          return '';
+        })()}
 
         <form data-form="client.withdraw">
           <div class="field-stack">
@@ -620,7 +626,7 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
             ${!home.profile.hasWithdrawalPin ? '<div style="font-size:11px;color:#e8b86d;margin-top:5px;">Tip: Set your Withdrawal PIN in Settings before withdrawing.</div>' : ''}
           </div>
 
-          <button type="submit" class="replica-primary-btn" ${(!home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount) ? 'disabled' : ''}>SUBMIT WITHDRAWAL</button>
+          <button type="submit" class="replica-primary-btn" ${(!home.profile.withdrawalEnabled || home.profile.frozen || home.profile.freezeAmount || Number(home.profile.reputationScore ?? 100) < 100) ? 'disabled' : ''}>SUBMIT WITHDRAWAL</button>
         </form>
       </div>
     </div>

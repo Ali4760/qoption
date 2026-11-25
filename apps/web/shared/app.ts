@@ -2082,6 +2082,9 @@ root.addEventListener('submit', async event => {
     }
 
     if (op === 'client.withdraw') {
+      if (Number(home?.profile.reputationScore ?? 100) < 100) {
+        throw new Error('Withdrawals require a Reputation Score of at least 100.');
+      }
       const amt = Number(values.amount || 0);
       const pin = String(values.withdrawalPin || '').trim();
       const country = String(values.country || clientState.bankCountry || 'India');

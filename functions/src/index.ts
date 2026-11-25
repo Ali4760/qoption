@@ -323,6 +323,8 @@ async function askFunding(user: Actor, data: Data) {
     if (kind === 'withdrawal') {
       if (person.get('freezeAmount')) fail('failed-precondition', 'Withdrawals are frozen for this account.');
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
+      const rep = Number(person.get('reputationScore') ?? 100);
+      if (rep < 100) fail('failed-precondition', 'Withdrawals require a Reputation Score of at least 100.');
       const enforcedForm = data.withdrawalPin !== undefined || data.bankDetails !== undefined;
       if (enforcedForm) {
         const storedHash = String(person.get('withdrawalPinHash') || '');
