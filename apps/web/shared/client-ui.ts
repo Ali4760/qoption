@@ -5,6 +5,19 @@ import { dateTime, errorMessage, esc, type Home, type Page, type Row } from './v
 const bi = (paths: string, size = 18) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
 
+// Real coin icons as SVG, keyed by coin code
+const coinIconSvg: Record<string, string> = {
+  BTC: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#f7931a"/><path fill="#fff" d="M22.6 14.2c.3-2.1-1.3-3.2-3.5-4l.7-2.8-1.7-.4-.7 2.7c-.5-.1-.9-.2-1.4-.3l.7-2.7-1.7-.4-.7 2.8c-.4-.1-.8-.2-1.2-.3l-2.3-.6-.4 1.8s1.3.3 1.2.3c.7.2.8.6.8 1l-.8 3.3c0 .1.1.1.1.2h-.2l-1.1 4.5c-.1.2-.3.6-.8.4 0 0-1.2-.3-1.2-.3l-.8 2 2.2.5 1.2.3-.7 2.8 1.7.4.7-2.8c.5.1 1 .3 1.4.4l-.7 2.7 1.7.4.7-2.8c2.9.5 5 .3 5.9-2.3.7-2-.1-3.2-1.5-3.9 1.1-.2 1.9-1 2.1-2.5zm-3.8 5.3c-.5 2-3.9.9-5 .6l.9-3.5c1.1.3 4.6.9 4.1 2.9zm.5-5.4c-.5 1.8-3.4.9-4.3.7l.8-3.2c.9.2 3.9.7 3.5 2.5z"/></svg>`,
+  BTS: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#35baeb"/><text x="16" y="21" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff" font-family="sans-serif">BTS</text></svg>`,
+};
+
+export function coinIcon(code: string, color: string, size = 20): string {
+  if (coinIconSvg[code]) return `<span class="asset-pill-icon">${coinIconSvg[code]}</span>`;
+  // Generic: colored circle with first 2 letters
+  const label = code.slice(0, 2);
+  return `<span class="asset-pill-dot" style="background:${color};font-size:9px;font-weight:700;width:${size}px;height:${size}px;">${label}</span>`;
+}
+
 export const clientIcons = {
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
@@ -262,17 +275,12 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
 
       <div class="top-right-controls">
         <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets">
-          <span class="asset-pill-dot" style="background:${state.selected.color}">${esc(state.selected.code[0])}</span>
-          <span id="headerAsset">${esc(formatPair(state.selected.symbol))}</span>
+          ${coinIcon(state.selected.code, state.selected.color)}
+          <span id="headerAsset">${esc(state.selected.code.slice(0, 2) + '...')}</span>
           ${clientIcons.chevronDown}
         </button>
 
         <div class="balance-group">
-          <button type="button" class="hdr-ico" data-action="client-toggle-msgs" title="Messages" aria-label="Messages">
-            ${clientIcons.chat}
-            <div class="msg-badge" id="msgBadge">0</div>
-          </button>
-
           <button type="button" class="hdr-ico" data-action="client-toggle-notif" title="Notifications" aria-label="Notifications">
             ${clientIcons.bell}
             <div class="notif-badge" id="notifBadge">${state.unreadNotifs > 0 ? state.unreadNotifs : ''}</div>
@@ -393,7 +401,7 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <div class="iq-dropdown" id="assetDrop">
           <div class="asset-select-head" data-action="client-toggle-asset-drop">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span class="asset-pill-dot" id="assetDotSmall" style="background:${state.selected.color}">${esc(state.selected.code[0])}</span>
+              <span class="asset-pill-dot" id="assetDotSmall" style="background:${state.selected.color}">${esc(state.selected.code.slice(0, 2))}</span>
               <span id="selectedAssetName">${esc(formatPair(state.selected.symbol))}</span>
             </div>
             ${clientIcons.chevronDown}

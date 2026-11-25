@@ -1,5 +1,6 @@
 export const assets = [
-  { symbol: 'BTCUSDT', name: 'Bitcoin', code: 'BTC', base: 67420, color: '#ffb15e' },
+  { symbol: 'BTCUSDT', name: 'Bitcoin', code: 'BTC', base: 67420, color: '#f7931a' },
+  { symbol: 'BTSUSDT', name: 'BitShares', code: 'BTS', base: 0.0145, color: '#35baeb' },
   { symbol: 'ETHUSDT', name: 'Ethereum', code: 'ETH', base: 3524, color: '#a5a8ff' },
   { symbol: 'XRPUSDT', name: 'XRP', code: 'XRP', base: 0.529, color: '#a6b9d7' },
   { symbol: 'ADAUSDT', name: 'Cardano', code: 'ADA', base: 0.461, color: '#69a9fc' },

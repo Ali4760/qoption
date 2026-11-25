@@ -13,7 +13,7 @@ import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, bra
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
-  clientIcons, clientNavItems, createLeaderboardData, curSym, downloadCsv, durationChoices, fileToCompressedDataUrl, filterTrades, filterTransactions,
+  clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, fileToCompressedDataUrl, filterTrades, filterTransactions,
   fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotificationsOverlayList,
   renderOrderBookHtml, renderTxnDetailHtml, validateBankDetails, type ClientState,
 } from './client-ui';
@@ -1219,16 +1219,16 @@ function updateMarket() {
     clientState.selected = selected;
     clientState.frame = frame;
     const hAsset = root.querySelector('#headerAsset');
-    if (hAsset) hAsset.textContent = formatPair(selected.symbol);
+    if (hAsset) hAsset.textContent = selected.code.slice(0, 2) + '...';
     const sAsset = root.querySelector('#selectedAssetName');
     if (sAsset) sAsset.textContent = formatPair(selected.symbol);
     const cMarket = root.querySelector('#chartMarketName');
     if (cMarket) cMarket.textContent = formatPair(selected.symbol);
-    const hDot = root.querySelector<HTMLElement>('.asset-btn-desk .asset-pill-dot');
+    // Update the header icon: replace entire asset-btn-desk icon area
+    const hIconWrap = root.querySelector<HTMLElement>('.asset-btn-desk .asset-pill-icon, .asset-btn-desk .asset-pill-dot');
+    if (hIconWrap) hIconWrap.outerHTML = coinIcon(selected.code, selected.color);
     const sDot = root.querySelector<HTMLElement>('#assetDotSmall');
-    for (const dot of [hDot, sDot]) {
-      if (dot) { dot.textContent = selected.code[0]; dot.style.background = selected.color; }
-    }
+    if (sDot) { sDot.textContent = selected.code.slice(0, 2); sDot.style.background = selected.color; }
     for (const btn of root.querySelectorAll<HTMLElement>('[data-action="frame"]')) {
       const active = btn.dataset.id === frame;
       btn.classList.toggle('active', active);
