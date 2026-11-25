@@ -12,19 +12,19 @@
   <a class="home-skip" href="#main">Skip to content</a>
   <header class="home-header">
     <div class="home-container home-header-grid">
-      <a class="brand" href="/home.html" aria-label="Qoption home"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span class="brand-wordmark">Option</span></a>
+      <a class="brand" href="/" aria-label="Qoption home"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span class="brand-wordmark">Option</span></a>
       <nav class="home-nav" id="home-navigation" aria-label="Main navigation">
-        <a href="/home.html">Home</a>
-        <a href="/#trade">Trading</a>
-        <a href="/home.html#markets">Crypto</a>
-        <a href="/home.html#how-it-works">How it works</a>
+        <a href="/">Home</a>
+        <a href="/login.html#trade">Trading</a>
+        <a href="/#markets">Crypto</a>
+        <a href="/#how-it-works">How it works</a>
         <a href="/faq.html" aria-current="page">FAQ</a>
-        <a href="/#messages">Contact</a>
-        <a href="/" class="home-menu-account">Sign in</a>
+        <a href="/login.html#assets">Contact</a>
+        <a href="/login.html" class="home-menu-account">Sign in</a>
         <a href="/register.html" class="home-menu-account">Create account</a>
       </nav>
       <div class="home-header-actions">
-        <a href="/" class="button secondary compact home-login">Sign in</a>
+        <a href="/login.html" class="button secondary compact home-login">Sign in</a>
         <a href="/register.html" class="button home-primary compact">Create account</a>
         <button type="button" class="button secondary compact home-menu-toggle" aria-controls="home-navigation" aria-expanded="false" aria-label="Open menu"><span aria-hidden="true"></span></button>
       </div>
@@ -61,7 +61,7 @@
           <div class="faq-questions">
             <details open><summary>How do I get started?</summary><p>Choose <a href="/register.html">Create an account</a>, enter an email address and password, then follow the prompts to open your workspace.</p></details>
             <details><summary>Do I need an invitation to register?</summary><p>You can create a Qoption account directly from the registration page. All new accounts start with the same workspace features.</p></details>
-            <details><summary>What should I do if I can’t sign in?</summary><p>Check that you’re using the email address you registered with. To reset your password, open <a href="/">Sign in</a>, choose <strong>Forgot password?</strong>, and follow the link sent to that address.</p></details>
+            <details><summary>What should I do if I can’t sign in?</summary><p>Check that you’re using the email address you registered with. To reset your password, open <a href="/login.html">Sign in</a>, choose <strong>Forgot password?</strong>, and follow the link sent to that address.</p></details>
             <details><summary>How is access to my account controlled?</summary><p>Qoption uses Firebase Authentication. You sign in to view your own wallet and trade history. Staff tools have a separate sign-in and require staff permissions.</p></details>
           </div>
         </section>
@@ -69,10 +69,10 @@
         <section class="faq-group" id="charts" aria-labelledby="faq-charts-heading">
           <h2 id="faq-charts-heading">Charts and trades</h2>
           <div class="faq-questions">
-            <details><summary>Where are current crypto prices shown?</summary><p>Open the <a href="/home.html#markets">market preview</a> and pick a pair from the watchlist. The selected pair’s last price is displayed beside the chart.</p></details>
-            <details><summary>What steps do I follow to place an order?</summary><p>In <a href="/#trade">Trading</a>, select an asset, enter your trade amount, choose an expiry and direction, and review the details before confirming.</p></details>
+            <details><summary>Where are current crypto prices shown?</summary><p>Open the <a href="/#markets">homepage watchlist</a> and pick a pair. The selected pair’s last price is displayed beside the chart.</p></details>
+            <details><summary>What steps do I follow to place an order?</summary><p>In <a href="/login.html#trade">Trading</a>, select an asset, enter your trade amount, choose an expiry and direction, and review the details before confirming.</p></details>
             <details><summary>How do I read the chart layers?</summary><p>Candlesticks show the open, high, low, and close for each interval. The line joins closing prices, and the bars at the bottom show traded volume.</p></details>
-            <details><summary>Which crypto pairs can I follow?</summary><p>Qoption shows BTC, ETH, SOL, XRP, ADA, and DOGE against USDT. You can switch between them from the public watchlist or the workspace’s asset picker.</p></details>
+            <details><summary>Which crypto pairs can I follow?</summary><p>The homepage watchlist shows BTC, ETH, and XRP against USDT. Sign in to see the full list in the trading workspace’s asset picker.</p></details>
             <details><summary>Why might charts show minor price differences?</summary><p>The public chart and order workspace both track live market feeds; minor timing or quote rounding differences can occur across intervals.</p></details>
           </div>
         </section>
@@ -80,7 +80,7 @@
         <section class="faq-group" id="wallet" aria-labelledby="faq-wallet-heading">
           <h2 id="faq-wallet-heading">Wallet and transfers</h2>
           <div class="faq-questions">
-            <details><summary>How can I deposit funds?</summary><p>Open your <a href="/#wallet">Assets</a> page, select Deposit, choose USDT (BNB Smart Chain) or UPI / Bank, upload your payment receipt, and submit. Approved requests are credited to your Real Account balance.</p></details>
+            <details><summary>How can I deposit funds?</summary><p>Open your <a href="/login.html#assets">Assets</a> page, select Deposit, choose USDT (BNB Smart Chain) or UPI / Bank, then enter your UTR or reference number and submit. Approved requests are credited to your Real Account balance.</p></details>
             <details><summary>What happens when I request a withdrawal?</summary><p>A withdrawal request places the requested amount on hold while verified with your bank details and Withdrawal PIN. Your Transaction History shows whether the request is pending, approved, rejected, or cancelled.</p></details>
             <details><summary>Where can I see the review status?</summary><p>Deposit and withdrawal requests are reviewed by staff. Open the funding history in your wallet to check the latest status.</p></details>
           </div>
@@ -99,14 +99,14 @@
           <div class="faq-questions">
             <details><summary>Can I use Qoption on my phone?</summary><p>Open Qoption in your mobile browser. The charts, account screens, and order controls adapt to smaller displays.</p></details>
             <details><summary>What if the workspace feels stuck while scrolling?</summary><p>Close any open order or account dialog, then swipe on the page beside the chart. Gestures inside the chart can move the displayed price history.</p></details>
-            <details><summary>How do I contact the team?</summary><p>Sign in and open <a href="/#messages">Messages</a> to send a support request. Include the relevant asset, approximate time, and what you were trying to do.</p></details>
-            <details><summary>Where can I explore Qoption’s features?</summary><p>Visit the <a href="/home.html">homepage</a> for the market preview and an overview of the order workflow, wallet, and trade history.</p></details>
+            <details><summary>How do I contact the team?</summary><p>Sign in, open <a href="/login.html#assets">Assets</a>, and select Contact Support. Include the relevant asset, approximate time, and what you were trying to do.</p></details>
+            <details><summary>Where can I explore Qoption’s features?</summary><p>Visit the <a href="/">homepage</a> for the market preview and an overview of the order workflow, wallet, and trade history.</p></details>
           </div>
         </section>
 
         <section class="faq-contact" aria-labelledby="faq-contact-heading">
           <div><h2 id="faq-contact-heading">Need more help?</h2><p>Send a message from your workspace.</p></div>
-          <a class="button" href="/#messages">Contact support</a>
+          <a class="button" href="/login.html#assets">Contact support</a>
         </section>
       </div>
     </div>
@@ -116,29 +116,29 @@
     <div class="home-container">
       <div class="home-footer-grid">
         <div class="home-footer-brand">
-          <a class="brand" href="/home.html" aria-label="Qoption home"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span class="brand-wordmark">Option</span></a>
+          <a class="brand" href="/" aria-label="Qoption home"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span class="brand-wordmark">Option</span></a>
           <p>Live crypto charts and a workspace for real-time trading.</p>
         </div>
         <nav class="home-footer-group" aria-labelledby="footer-platform">
           <h2 id="footer-platform">Platform</h2>
-          <a href="/home.html">Home</a>
-          <a href="/#trade">Trading</a>
-          <a href="/home.html#markets">Crypto markets</a>
+          <a href="/">Home</a>
+          <a href="/login.html#trade">Trading</a>
+          <a href="/#markets">Crypto markets</a>
         </nav>
         <nav class="home-footer-group" aria-labelledby="footer-resources">
           <h2 id="footer-resources">Resources</h2>
-          <a href="/home.html#how-it-works">How it works</a>
+          <a href="/#how-it-works">How it works</a>
           <a href="/faq.html">FAQ</a>
         </nav>
         <nav class="home-footer-group" aria-labelledby="footer-support">
           <h2 id="footer-support">Support</h2>
-          <a href="/#messages">Contact support</a>
+          <a href="/login.html#assets">Contact support</a>
         </nav>
       </div>
       <div class="home-footer-bottom">
         <small>© <span id="home-footer-year">2026</span> Qoption</small>
         <nav aria-label="Account links">
-          <a href="/">Sign in</a>
+          <a href="/login.html">Sign in</a>
           <a href="/register.html">Create account</a>
         </nav>
       </div>

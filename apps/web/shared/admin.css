@@ -1077,6 +1077,21 @@
   display: block;
 }
 
+.admin-shell .icon-action-btn.chat-pending {
+  position: relative;
+}
+
+.admin-shell .icon-action-btn.chat-pending::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffb66b;
+  content: '';
+}
+
 .admin-shell .icon-action-btn:hover {
   background: #182b41;
   border-color: #3d5d7e;
@@ -1114,6 +1129,11 @@
   border-radius: 9px;
 }
 
+.admin-shell ~ dialog .notif-record-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .admin-shell ~ dialog .notif-record-copy strong {
   display: block;
   font-size: .88rem;
@@ -1133,8 +1153,15 @@
   font-size: .74rem;
 }
 
+.admin-shell ~ dialog .notif-record-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 .admin-shell ~ dialog .notif-delete-btn {
-  flex-shrink: 0;
   margin-right: 0;
 }
 
@@ -1159,6 +1186,49 @@
   background: #ff6b81;
   border-color: #ff6b81;
   color: #fff;
+}
+
+.admin-shell ~ dialog:has(.deposit-settings-grid) {
+  width: min(680px, calc(100vw - 24px));
+}
+
+.deposit-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.deposit-settings-grid fieldset {
+  min-width: 0;
+  align-content: start;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #233448;
+  border-radius: 10px;
+}
+
+.deposit-settings-grid legend {
+  padding-inline: 5px;
+  font-weight: 700;
+}
+
+.deposit-settings-grid input[type="file"] {
+  max-width: 100%;
+}
+
+.deposit-qr-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.deposit-qr-preview img {
+  object-fit: contain;
+  background: white;
+  border-radius: 6px;
+}
+
+@media (max-width: 580px) {
+  .deposit-settings-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ─── Edit Client Modal ──────────────────────────────────── */

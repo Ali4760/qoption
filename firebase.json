@@ -60,6 +60,13 @@
         ]
       }
     ],
+    "redirects": [
+      {
+        "source": "/home.html",
+        "destination": "/",
+        "type": 301
+      }
+    ],
     "rewrites": [
       {
         "source": "/admin/**",

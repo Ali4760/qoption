@@ -6,14 +6,6 @@
   font-display: swap;
 }
 
-@font-face {
-  font-family: "Workspace Syne";
-  src: url("../assets/syne-latin.woff2?no-inline") format("woff2");
-  font-style: normal;
-  font-weight: 400 800;
-  font-display: swap;
-}
-
 .user-shell {
   --workspace-field: #0a1421;
   --workspace-line: #203147;

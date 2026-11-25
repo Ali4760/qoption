@@ -1,6 +1,13 @@
 export type Row = { id: string; [key: string]: unknown };
 export type Page = { rows: Row[]; cursor: string | null };
 export type Wallet = { available: number; held: number };
+export type DepositSettings = {
+  usdtBscAddress?: string;
+  upiId?: string;
+  upiName?: string;
+  upiQrImage?: string;
+  usdtBscQrImage?: string;
+};
 export type Profile = {
   uid: string;
   name: string;
@@ -22,7 +29,7 @@ export type Home = {
   profile: Profile;
   wallet: Wallet;
   active: Row[];
-  depositSettings?: { usdtBscAddress?: string; upiId?: string };
+  depositSettings?: DepositSettings;
   serverTime: number;
 };
 

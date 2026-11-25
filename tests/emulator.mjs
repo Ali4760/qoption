@@ -65,7 +65,37 @@ async function main() {
     await call(trader, 'funding.cancel', { id: withdrawal.id, requestId: randomUUID() });
     assert.equal((await call(trader, 'home')).wallet.available, settled.wallet.available);
 
-    const deposit = await call(trader, 'funding.request', { kind: 'deposit', amount: 2500, requestId: randomUUID() });
+    const qrImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS94AAAAASUVORK5CYII=';
+    const depositSettings = {
+      uid,
+      upiId: 'qoption-test@upi',
+      upiName: 'Qoption Test',
+      upiQrImage: qrImage,
+      usdtBscAddress: '0x1111111111111111111111111111111111111111',
+      usdtBscQrImage: qrImage,
+      requestId: randomUUID(),
+    };
+    await call(trader, 'admin.depositSettings.update', depositSettings, 403);
+    await call(staff, 'admin.depositSettings.update', { uid, upiQrImage: 'data:image/svg+xml;base64,PHN2Zz4=', requestId: randomUUID() }, 400);
+    const updated = await call(staff, 'admin.depositSettings.update', depositSettings);
+    assert.deepEqual((await call(staff, 'admin.depositSettings', { uid })).depositSettings, updated.depositSettings);
+    assert.deepEqual((await call(trader, 'home')).depositSettings, updated.depositSettings);
+    assert.equal(updated.depositSettings.usdtBscQrImage, qrImage);
+    assert.equal(updated.depositSettings.upiQrImage, qrImage);
+    assert.equal(updated.depositSettings.upiId, 'qoption-test@upi');
+    assert.equal(updated.depositSettings.upiName, 'Qoption Test');
+    assert.ok((await db.collection('userSync').doc(uid).get()).get('depositSettingsAt') > 0);
+    const differentTrader = await identityCall('signInWithPassword', 'trader@example.test');
+    assert.notEqual((await call(differentTrader, 'home')).depositSettings.upiId, 'qoption-test@upi');
+
+    const depositInput = { kind: 'deposit', amount: 2500, method: 'UPI / BANK', requestId: randomUUID() };
+    await call(trader, 'funding.request', depositInput, 400);
+    const deposit = await call(trader, 'funding.request', { ...depositInput, referenceNumber: ' 123456789012 ' });
+    const retriedDeposit = await call(trader, 'funding.request', { ...depositInput, referenceNumber: '123456789012' });
+    assert.equal(retriedDeposit.id, deposit.id);
+    await call(trader, 'funding.request', { ...depositInput, referenceNumber: '123456789013' }, 409);
+    const staffDeposits = await call(staff, 'admin.funding', { kind: 'deposit', status: 'pending' });
+    assert.equal(staffDeposits.rows.find(row => row.id === deposit.id)?.referenceNumber, '123456789012');
     const decision = { id: deposit.id, status: 'approved', reason: 'Verified test request', requestId: randomUUID() };
     await call(trader, 'admin.funding.decide', decision, 403);
     await call(staff, 'admin.funding.decide', decision);
@@ -75,6 +105,11 @@ async function main() {
     await call(trader, 'message.send', { message: 'Test message', requestId: randomUUID() });
     const thread = await call(staff, 'admin.messages', { uid });
     assert.equal(thread.rows[0].message, 'Test message');
+    assert.equal((await db.collection('profiles').doc(uid).get()).get('supportNeedsReply'), true);
+    await call(staff, 'admin.message.send', { uid, message: 'Support reply', requestId: randomUUID() });
+    const customerThread = await call(trader, 'list', { list: 'messages' });
+    assert.ok(customerThread.rows.some(row => row.sender === 'Support' && row.message === 'Support reply'));
+    assert.equal((await db.collection('profiles').doc(uid).get()).get('supportNeedsReply'), false);
 
     const batch = db.batch();
     for (let index = 0; index < 28; index++) {
@@ -97,14 +132,14 @@ async function main() {
     assert.ok(readNotif, 'Notification remains in list after being marked as read');
     assert.equal(readNotif.read, true);
 
-    console.log('Firebase integration passed: account separation, rules, idempotent trades, settlement, funding, messaging, notifications, and pagination.');
+    console.log('Firebase integration passed: account separation, rules, trades, funding references, deposit settings, support chat, notifications, and pagination.');
   } finally {
     const cleanup = db.batch();
     for (const name of ['trades', 'funding', 'ledger', 'messages', 'notifications', 'audit', 'operationReceipts']) {
       const snapshot = await db.collection(name).where('uid', '==', uid).get();
       for (const doc of snapshot.docs) cleanup.delete(doc.ref);
     }
-    for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync']) cleanup.delete(db.collection(name).doc(uid));
+    for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync', 'depositSettings']) cleanup.delete(db.collection(name).doc(uid));
     await cleanup.commit();
     await auth.deleteUser(uid);
   }

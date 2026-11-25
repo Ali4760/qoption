@@ -25,7 +25,7 @@ export function userLogin({ registration, signedIn, remember, showQuickStart, no
     '<button class="button login-submit" type="submit">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>';
 
   const alternate = !signedIn ? '<p class="login-alternate">' + (registration ? 'Already have an account?' : 'New to Qoption?') +
-    ' <a href="' + (registration ? '/' : '/register.html') + '" class="login-link">' + (registration ? 'Sign in' : 'Create an account') + '</a></p>' : '';
+    ' <a href="' + (registration ? '/login.html' : '/register.html') + '" class="login-link">' + (registration ? 'Sign in' : 'Create an account') + '</a></p>' : '';
   const quickStartLink = showQuickStart && !signedIn
     ? '<button class="button secondary login-quick-start" data-action="quick-start" type="button">Open trading workspace</button>' : '';
 
@@ -33,12 +33,12 @@ export function userLogin({ registration, signedIn, remember, showQuickStart, no
     '<div class="login-card"><div class="login-brand">' + brand + '</div><header class="login-heading"><h1 id="login-title">' + title + '</h1>' +
     '<p>' + (registration ? 'Start with your trading account.' : 'Access your trading terminal, wallet, and trade history.') + '</p></header>' +
     status + form + alternate + quickStartLink + '<p id="auth-notice" class="form-status" role="status"></p>' +
-    '<footer class="login-footer"><a href="/home.html">Home</a><a href="/admin/">Staff sign-in</a></footer></div></section>' +
+    '<footer class="login-footer"><a class="button secondary compact" href="/#download-app">Download app</a></footer></div></section>' +
     '<section class="login-market" aria-labelledby="login-market-title"><div class="login-market-content">' +
     '<h2 id="login-market-title">A clearer view of the market.</h2><p>Follow live crypto prices and execute trades directly from your real account.</p>' +
     '<div class="login-chart-card"><div class="login-chart-heading"><span class="login-ticker">BTC<span>/USDT</span></span>' +
     '<span id="login-chart-status">Live chart</span></div>' +
     '<canvas id="login-chart" class="chart" aria-label="Bitcoin live market line chart"></canvas>' +
-    (!signedIn ? '<div class="login-chart-footer"><button class="login-link" data-action="guest-market" type="button">Explore live markets</button></div>' : '') +
+    (!signedIn ? '<div class="login-chart-footer"><a class="login-link" href="/">Explore live markets</a></div>' : '') +
     '</div></div></section></main>';
 }

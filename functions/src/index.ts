@@ -143,6 +143,12 @@ function requireRole(user: Actor, role: string) {
   if (!user.staff.includes(role)) fail('permission-denied', 'Your staff role cannot perform this action.');
 }
 
+function supportRole(user: Actor): string {
+  const role = user.staff.includes('admin') ? 'admin' : 'support';
+  requireRole(user, role);
+  return role;
+}
+
 function checkScope(user: Actor, client: DocumentData | undefined) {
   if (!client || (!user.allClients && client.assignedTo !== user.uid)) fail('permission-denied', 'This client is outside your staff scope.');
 }
@@ -306,6 +312,78 @@ function cleanBankDetails(raw: unknown): Record<string, string> | null {
   return Object.keys(cleaned).length ? cleaned : null;
 }
 
+const depositSettingsRef = (uid: string) => db.collection('depositSettings').doc(uid);
+const defaultSettingsRef = () => db.collection('meta').doc('settings');
+
+function effectiveDepositSettings(defaults: DocumentData, client: DocumentData) {
+  return {
+    usdtBscAddress: String(client.usdtBscAddress ?? (client.usdtBscQrImage ? '' : defaults.usdtBscAddress || defaults.usdtAddress || '')),
+    upiId: String(client.upiId ?? (client.upiQrImage ? '' : defaults.upiId ?? '')),
+    upiName: String(client.upiName ?? (client.upiQrImage ? '' : defaults.upiName ?? '')),
+    upiQrImage: String(client.upiQrImage ?? ''),
+    usdtBscQrImage: String(client.usdtBscQrImage ?? ''),
+  };
+}
+
+function depositQrImage(value: unknown): string {
+  const image = text(value, 400000, 0);
+  if (!image) return image;
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
+  if (!match || match[2].length % 4 !== 0) fail('invalid-argument', 'Upload a PNG, JPEG, or WebP QR code image.');
+  const [, format, encoded] = match;
+  const bytes = Buffer.from(encoded, 'base64');
+  const validHeader = format === 'png' ? bytes.subarray(0, 8).toString('hex') === '89504e470d0a1a0a'
+    : format === 'jpeg' ? bytes.subarray(0, 3).toString('hex') === 'ffd8ff'
+    : bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (!validHeader) fail('invalid-argument', 'Upload a PNG, JPEG, or WebP QR code image.');
+  return image;
+}
+
+async function readClientDepositSettings(user: Actor, uid: string) {
+  requireRole(user, 'admin');
+  const [person, defaults, settings] = await Promise.all([
+    profile(uid).get(), defaultSettingsRef().get(), depositSettingsRef(uid).get(),
+  ]);
+  checkScope(user, person.data());
+  return { depositSettings: effectiveDepositSettings(defaults.data() ?? {}, settings.data() ?? {}) };
+}
+
+async function updateClientDepositSettings(user: Actor, data: Data) {
+  requireRole(user, 'admin');
+  const uid = identifier(data.uid);
+  const updates: Record<string, string> = {};
+  for (const key of ['upiId', 'upiName'] as const) {
+    if (data[key] === undefined) continue;
+    const value = text(data[key], 120, 0);
+    if (/[\u0000-\u001f\u007f]/.test(value)) fail('invalid-argument', 'Enter UPI details on a single line.');
+    updates[key] = value;
+  }
+  if (data.usdtBscAddress !== undefined) {
+    const address = text(data.usdtBscAddress, 42, 0);
+    if (address && !/^0x[a-fA-F0-9]{40}$/.test(address)) fail('invalid-argument', 'Enter a valid BNB Smart Chain address.');
+    updates.usdtBscAddress = address;
+  }
+  for (const key of ['upiQrImage', 'usdtBscQrImage'] as const) {
+    if (data[key] !== undefined) updates[key] = depositQrImage(data[key]);
+  }
+  if (!Object.keys(updates).length) fail('invalid-argument', 'Enter a change to the deposit settings.');
+
+  const ref = depositSettingsRef(uid);
+  await mutate(user, data, 'admin.depositSettings.update', [uid, updates], async tx => {
+    await checkStaff(tx, user, 'admin');
+    const [person, settings] = await Promise.all([tx.get(profile(uid)), tx.get(ref)]);
+    checkScope(user, person.data());
+    const now = Date.now();
+    const version = Math.max(now, Number(settings.get('updatedAt') || 0) + 1);
+    tx.set(ref, { ...updates, updatedAt: version }, { merge: true });
+    tx.set(db.collection('userSync').doc(uid), { depositSettingsAt: version }, { merge: true });
+    audit(tx, user, uid, 'Deposit settings updated', 'Deposit payment details updated', now);
+    return { uid };
+  });
+  await bumpSync({ auditAt: Date.now() });
+  return readClientDepositSettings(user, uid);
+}
+
 async function askFunding(user: Actor, data: Data) {
   const kind = data.kind;
   if (kind !== 'deposit' && kind !== 'withdrawal') fail('invalid-argument', 'Invalid funding type.');
@@ -318,10 +396,13 @@ async function askFunding(user: Actor, data: Data) {
   const note = typeof data.note === 'string' && data.note.trim() ? data.note.trim().slice(0, 240) : '';
   const bankDetails = kind === 'withdrawal' ? cleanBankDetails(data.bankDetails) : null;
   const withdrawalPin = typeof data.withdrawalPin === 'string' ? data.withdrawalPin.trim() : '';
-  const rawReceipt = typeof data.receiptUrl === 'string' ? data.receiptUrl.trim() : '';
-  const receiptUrl = rawReceipt.startsWith('data:image/') && rawReceipt.length <= 450000 ? rawReceipt : '';
+  const referenceNumber = kind === 'deposit' && typeof data.referenceNumber === 'string' ? data.referenceNumber.trim() : '';
+  if (kind === 'deposit' && (!referenceNumber || referenceNumber.length > 128 || /[\u0000-\u001f\u007f]/.test(referenceNumber))) {
+    fail('invalid-argument', 'Enter a UTR or reference number of up to 128 characters.');
+  }
 
-  const result = await mutate(user, data, 'funding.request', [kind, amount, method], async tx => {
+  const parameters = kind === 'deposit' ? [kind, amount, method, referenceNumber] : [kind, amount, method];
+  const result = await mutate(user, data, 'funding.request', parameters, async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (!person.exists) fail('failed-precondition', 'Open the workspace before submitting a request.');
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
@@ -353,7 +434,7 @@ async function askFunding(user: Actor, data: Data) {
       method,
     };
     if (note) docData.note = note;
-    if (receiptUrl) docData.receiptUrl = receiptUrl;
+    if (referenceNumber) docData.referenceNumber = referenceNumber;
     if (bankDetails) docData.details = bankDetails;
     tx.create(ref, docData);
     return { id: ref.id };
@@ -432,37 +513,34 @@ async function page(query: Query, data: Data, scope: unknown, field = 'createdAt
 const own = (collection: string, uid: string) => db.collection(collection).where('uid', '==', uid);
 async function home(user: Actor) {
   await settleDue(user.uid);
-  const [person, funds, active, settingsSnap] = await Promise.all([
+  const [person, funds, active, defaults, settings] = await Promise.all([
     profile(user.uid).get(), wallet(user.uid).get(),
     own('trades', user.uid).where('status', '==', 'open').orderBy('createdAt', 'desc').limit(8).get(),
-    db.collection('meta').doc('settings').get(),
+    defaultSettingsRef().get(), depositSettingsRef(user.uid).get(),
   ]);
   const rawProfile = person.data() || {};
   const { withdrawalPinHash, ...safeProfile } = rawProfile as Record<string, unknown>;
-  const settingsData = settingsSnap.data() || {};
   return {
     profile: { ...safeProfile, hasWithdrawalPin: Boolean(withdrawalPinHash) },
     wallet: funds.data(),
     active: active.docs.map(doc => ({ ...doc.data(), id: doc.id })),
-    depositSettings: {
-      usdtBscAddress: String(settingsData.usdtBscAddress || settingsData.usdtAddress || ''),
-      upiId: String(settingsData.upiId || ''),
-    },
+    depositSettings: effectiveDepositSettings(defaults.data() ?? {}, settings.data() ?? {}),
     serverTime: Date.now(),
   };
 }
 
 async function message(user: Actor, data: Data, asStaff: boolean) {
-  if (asStaff) requireRole(user, 'support');
+  const role = asStaff ? supportRole(user) : null;
   const target = asStaff ? identifier(data.uid) : user.uid;
   const content = text(data.message, 1000);
   const result = await mutate(user, data, 'message.send', [target, content, asStaff], async tx => {
-    if (asStaff) {
-      await checkStaff(tx, user, 'support');
-      checkScope(user, (await tx.get(profile(target))).data());
-    }
+    if (role) await checkStaff(tx, user, role);
+    const client = await tx.get(profile(target));
+    if (role) checkScope(user, client.data());
+    else if (!client.exists) fail('failed-precondition', 'Open your workspace before sending a message.');
     const ref = db.collection('messages').doc();
     tx.create(ref, { uid: target, sender: asStaff ? 'Support' : 'You', message: content, createdAt: Date.now() });
+    tx.update(client.ref, { supportNeedsReply: !asStaff });
     return { id: ref.id };
   });
   await bumpSync({ messagesAt: Date.now() }, asStaff ? [target] : []);
@@ -866,7 +944,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     }
   }
 
-  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete', 'admin.invite.refresh'].includes(op);
+  const staffWrite = ['admin.funding.decide', 'admin.depositSettings.update', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete', 'admin.invite.refresh'].includes(op);
   if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
   }
@@ -963,6 +1041,8 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       result.rows = result.rows.map(r => ({ ...r, balance: walletMap.get(String(r.id))?.available ?? 0 }));
       return result;
     }
+    case 'admin.depositSettings': return readClientDepositSettings(user, identifier(data.uid));
+    case 'admin.depositSettings.update': return updateClientDepositSettings(user, data);
     case 'admin.funding': {
       requireRole(user, 'finance');
       const kind = data.kind, status = data.status;
@@ -987,7 +1067,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     }
     case 'admin.client': return clientView(user, data);
     case 'admin.messages': {
-      requireRole(user, 'support');
+      supportRole(user);
       const uid = identifier(data.uid);
       checkScope(user, (await profile(uid).get()).data());
       return page(own('messages', uid), data, [op, user.uid, uid]);

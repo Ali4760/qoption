@@ -224,6 +224,12 @@ export function mountChart(
       const now = Date.now() + clockOffset, price = demoPrice(asset, now);
       points = demoHistory(asset, interval, now, 160);
       points[points.length - 1] = { time: now, price };
+      if (options.replica) {
+        points = points.map((point, index, history) => {
+          const open = history[index - 1]?.price ?? point.price;
+          return { ...point, open, high: Math.max(open, point.price), low: Math.min(open, point.price) };
+        });
+      }
       onPrice(price); paint(); timer = window.setTimeout(tick, 1200);
     };
     tick();

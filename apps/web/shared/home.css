@@ -82,8 +82,8 @@
 .home-reference dd { margin: 4px 0 0; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .home-reference dd span { color: var(--muted); font-size: .79rem; margin-left: 4px; }
 .home-section { padding: 66px 0 0; scroll-margin-top: 48px; }
-.home-section h2, .home-invite h2 { font-size: clamp(1.65rem, 3.5vw, 2.65rem); letter-spacing: -.04em; line-height: 1.12; }
-.home-section > p, .home-faq p, .home-invite p { color: var(--muted); margin-top: 8px; }
+.home-section h2, .home-download h2 { font-size: clamp(1.65rem, 3.5vw, 2.65rem); letter-spacing: -.04em; line-height: 1.12; }
+.home-section > p, .home-faq p, .home-download p { color: var(--muted); margin-top: 8px; }
 .home-workflow { margin: 23px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; list-style: none; counter-reset: workflow; }
 .home-workflow li { counter-increment: workflow; border: 1px solid var(--line); background: var(--panel-fill); border-radius: 11px; padding: 21px; }
 .home-workflow li::before { content: counter(workflow) "."; display: block; color: var(--accent); font-weight: 700; margin-bottom: 13px; }
@@ -95,12 +95,11 @@
 .home-faq details { border-bottom: 1px solid var(--line); padding: 15px 5px; }
 .home-faq summary { cursor: pointer; font-weight: 650; padding-block: 3px; }
 .home-faq details p { font-size: .91rem; margin: 9px 0 0; }
-.home-invite { display: flex; align-items: center; justify-content: space-between; gap: 15px; background: linear-gradient(112deg, var(--glow-mint), var(--glow-blue)), var(--surface); border: 1px solid var(--line); border-radius: 14px; margin: 57px 0; padding: 25px clamp(17px, 4vw, 39px); }
-.home-invite a { white-space: nowrap; }
+.home-download { background: linear-gradient(112deg, var(--glow-mint), var(--glow-blue)), var(--surface); border: 1px solid var(--line); border-radius: 14px; margin: 57px 0; padding: 25px clamp(17px, 4vw, 39px); scroll-margin-top: 82px; }
 @media (max-width: 820px) {
   .home-terminal { grid-template-columns: 1fr; }
   .home-watchlist { border-left: 0; border-top: 1px solid var(--line); }
-  .home-market-list { grid-template-columns: 1fr 1fr; }
+  .home-market-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .home-faq { grid-template-columns: 1fr; }
 }
 @media (max-width: 580px) {
@@ -117,5 +116,5 @@
   .home-reference { grid-template-columns: 1fr; padding-inline: 14px; }
   .home-workflow { grid-template-columns: 1fr; }
   .home-section { padding-top: 43px; }
-  .home-invite { flex-direction: column; align-items: flex-start; margin-block: 39px; }
+  .home-download { margin-block: 39px; }
 }

@@ -1,4 +1,5 @@
 import logoUrl from '../assets/qoption-logo.png';
+import type { ChartMode } from './canvas-chart';
 import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
 import { dateTime, errorMessage, esc, type Home, type Page, type Row } from './view';
 
@@ -21,6 +22,7 @@ export function coinIcon(code: string, color: string, size = 20): string {
 export const clientIcons = {
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
+  candlesticks: bi('<path d="M3 5v2m0 5v2m5-13v3m0 6v3m5-11v3m0 5v2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/><rect x="1.5" y="7" width="3" height="5" rx=".5"/><rect x="6.5" y="4" width="3" height="6" rx=".5"/><rect x="11.5" y="5" width="3" height="5" rx=".5"/>'),
   tradeArrow: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5"/>'),
   wallet: bi('<path d="M12.136.326A1.5 1.5 0 0 1 14 1.78V3h.5A1.5 1.5 0 0 1 16 4.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-9a1.5 1.5 0 0 1 1.432-1.499zM5.562 3H13V1.78a.5.5 0 0 0-.621-.484zM1.5 4a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5z"/>'),
   history: bi('<path d="M8.515 1.019A7 7 0 0 0 8 1V0a8 8 0 0 1 .589.022zm2.004.45a7 7 0 0 0-.985-.299l.219-.976q.576.129 1.126.342zm1.37.71a7 7 0 0 0-.439-.27l.493-.87a8 8 0 0 1 .979.654l-.615.789a7 7 0 0 0-.418-.302zm1.834 1.79a7 7 0 0 0-.653-.796l.724-.69q.406.429.747.91zm.744 1.352a7 7 0 0 0-.214-.468l.893-.45a8 8 0 0 1 .45 1.088l-.95.313a7 7 0 0 0-.179-.483m.53 2.507a7 7 0 0 0-.1-1.025l.985-.17q.1.58.116 1.17zm-.131 1.538q.05-.254.081-.51l.993.123a8 8 0 0 1-.23 1.155l-.964-.267q.069-.247.12-.501m-.952 2.379q.276-.436.486-.908l.914.405q-.24.54-.555 1.038zm-.964 1.205q.183-.183.35-.378l.758.653a8 8 0 0 1-.401.432z"/><path d="M8 1a7 7 0 1 0 4.95 11.95l.707.707A8.001 8.001 0 1 1 8 0z"/><path d="M7.5 3a.5.5 0 0 1 .5.5v5.21l3.248 1.856a.5.5 0 0 1-.496.868l-3.5-2A.5.5 0 0 1 7 9V3.5a.5.5 0 0 1 .5-.5"/>'),
@@ -45,9 +47,6 @@ export const clientIcons = {
   close: bi('<path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8z"/>', 14),
   send: bi('<path d="M15.964.686a.5.5 0 0 0-.65-.65L.767 5.855H.766l-.452.18a.5.5 0 0 0-.082.887l.41.26.001.002 4.995 3.178 3.178 4.995.002.002.26.41a.5.5 0 0 0 .886-.083zm-1.833 1.89L6.637 10.07l-.215-.338a.5.5 0 0 0-.154-.154l-.338-.215 7.494-7.494 1.178-.471z"/>', 14),
 };
-
-const DEFAULT_QR_PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAACWAQMAAAAGz+OhAAAABlBMVEX///8AAABVwtN+AAAACXBIWXMAAA7EAAAOxAGVKw4bAAABI0lEQVRIib2WOxLCMAxElaFw6SP4KFyMyedmOYqPkNKFJ2IlAQMMJV4NRfxSRKxWkkV+xKKIXfKudWrFDu3v7Ibv5L3nPeFUVpGJxLIC4EWTWcqmujEZZNAqfHY5JJn2ROba63HV73qMZeE1pINEPv03lkVcVNE+zxODIZeeFRrgOdUZPw6D9gA9etpsvnLYS/ukp+XyUY+BTLLC4B0Z1eWRDoUtJoCl08rpY+z8P4POXa56IINJrbhCY/jLwC75murSaMytJaYBTBV+JjAzc/SvWSzm5HgW4asBTp7cWgz26CMMDWSBUWlTi8FiL6CVPIvoIwqL/XtILIX3nUxgfuXAsNrUPU5jXnAsBbtykJhrDyZFv+4CQ1l4zZhVe7Y3FPYj7rc4qAKiTHuaAAAAAElFTkSuQmCC';
 
 const currencySymbols: Record<string, string> = {
   INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ',
@@ -219,8 +218,10 @@ export type ClientState = {
   walletSubTab: 'deposit' | 'withdraw';
   depositMethod: 'USDT_BSC' | 'UPI';
   depositPresetAmount: number;
+  depositReferenceNumber: string;
   selected: Asset;
   frame: string;
+  chartMode: Exclude<ChartMode, 'combined'>;
   selDur: number;
   selProfit: number;
   livePrice: number;
@@ -239,6 +240,24 @@ export type ClientState = {
   txnFilters: { search: string; type: string; status: string; date: string; sort: string };
   tradeFilters: { search: string; result: string; dir: string; date: string; sort: string };
 };
+
+const clientChartTypes = {
+  candles: { label: 'Candlestick chart', icon: clientIcons.candlesticks },
+  line: { label: 'Line chart', icon: clientIcons.trade },
+};
+
+export function clientChartPresentation(mode: ClientState['chartMode']) {
+  const nextMode = mode === 'candles' ? 'line' : 'candles';
+  const chartType = clientChartTypes[mode];
+  const nextType = clientChartTypes[nextMode];
+  return {
+    nextMode,
+    subtitle: `Live market · ${chartType.label}`,
+    canvasLabel: `Live market ${chartType.label.toLowerCase()}`,
+    toggleLabel: `Switch to ${nextType.label.toLowerCase()}`,
+    toggleIcon: nextType.icon,
+  } as const;
+}
 
 export function createLeaderboardData() {
   const names = [
@@ -262,6 +281,7 @@ export function createLeaderboardData() {
 export function buildClientShellHtml(home: Home, state: ClientState) {
   const balText = fmtMoney(home.wallet.available, home);
   const balColor = Number(home.wallet.available) < 0 ? 'var(--iq-green)' : 'var(--iq-green)';
+  const chartPresentation = clientChartPresentation(state.chartMode);
   return `
   <div id="app-interface" class="${state.activeTab === 'market' ? 'market-active' : 'content-expanded'}">
     <div class="top-bar">
@@ -364,17 +384,22 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
               <div class="chart-symbol-mark">${clientIcons.tradeArrow}</div>
               <div>
                 <div class="chart-market-name" id="chartMarketName">${esc(formatPair(state.selected.symbol))}</div>
-                <div class="chart-market-subtitle">Live market · Line chart</div>
+                <div class="chart-market-subtitle">${chartPresentation.subtitle}</div>
               </div>
             </div>
-            <div class="chart-timeframes" role="group" aria-label="Chart timeframe">
-              ${[['1m','1m'],['5m','5m'],['15m','15m'],['1h','1H'],['4h','4H'],['1d','1D']].map(([val, lbl]) => `
-                <button type="button" class="chart-timeframe${state.frame === val ? ' active' : ''}" data-action="frame" data-id="${val}" aria-pressed="${state.frame === val}">${lbl}</button>
-              `).join('')}
+            <div class="chart-controls">
+              <div class="chart-timeframes" role="group" aria-label="Chart timeframe">
+                ${[['1m','1m'],['5m','5m'],['15m','15m'],['1h','1H'],['4h','4H'],['1d','1D']].map(([val, lbl]) => `
+                  <button type="button" class="chart-timeframe${state.frame === val ? ' active' : ''}" data-action="frame" data-id="${val}" aria-pressed="${state.frame === val}">${lbl}</button>
+                `).join('')}
+              </div>
+              <button type="button" class="chart-mode-toggle" data-action="client-toggle-chart-mode" aria-controls="market-chart" aria-label="${chartPresentation.toggleLabel}" title="${chartPresentation.toggleLabel}">
+                ${chartPresentation.toggleIcon}
+              </button>
             </div>
           </div>
           <div class="chart-plot">
-            <canvas id="market-chart" aria-label="Live market line chart"></canvas>
+            <canvas id="market-chart" aria-label="${chartPresentation.canvasLabel}"></canvas>
             <div class="chart-live-marker" id="chartLiveMarker" aria-hidden="true"></div>
             <span id="market-price" hidden></span>
           </div>
@@ -513,18 +538,37 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
   </div>`;
 }
 
+export function renderDepositPaymentHtml(home: Home, method: ClientState['depositMethod']) {
+  const isBsc = method === 'USDT_BSC';
+  const settings = home.depositSettings;
+  const address = (isBsc ? settings?.usdtBscAddress : settings?.upiId)?.trim() || '';
+  const name = isBsc ? '' : settings?.upiName?.trim() || '';
+  const addressLabel = isBsc ? 'Wallet address' : 'UPI ID';
+  let qrSrc = isBsc ? settings?.usdtBscQrImage : settings?.upiQrImage;
+  if (!qrSrc && address) {
+    const payment = isBsc ? address : `upi://pay?${new URLSearchParams({ pa: address, pn: name || 'Qoption', cu: 'INR' })}`;
+    qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(payment)}`;
+  }
+  if (!qrSrc) return '<p class="deposit-payment-empty">Payment details are unavailable. Contact support for help.</p>';
+  return `
+    <div class="qr-frame">
+      <img src="${esc(qrSrc)}" alt="${isBsc ? 'USDT on BNB Smart Chain' : 'UPI / bank'} deposit QR code" width="150" height="150">
+    </div>
+    ${address || name ? `<dl class="deposit-payment-details">
+      ${address ? `<div><dt>${addressLabel}</dt><dd>
+        <button type="button" class="dep-addr-row" data-action="client-copy-dep-addr" data-addr="${esc(address)}" aria-label="Copy ${addressLabel}">
+          <span>${esc(address)}</span>${clientIcons.clipboard}
+        </button>
+      </dd></div>` : ''}
+      ${name ? `<div><dt>Name</dt><dd>${esc(name)}</dd></div>` : ''}
+    </dl>` : ''}`;
+}
+
 export function buildWalletTabHtml(home: Home, state: ClientState) {
   const sym = curSym(home);
   const isDep = state.walletSubTab === 'deposit';
   const presets = [1000, 3000, 5000, 10000, 25000, 50000];
   const isBsc = state.depositMethod === 'USDT_BSC';
-  const bscAddr = home.depositSettings?.usdtBscAddress?.trim() || '';
-  const upiId = home.depositSettings?.upiId?.trim() || '';
-  const activeAddr = isBsc ? bscAddr : upiId;
-  const addrDisplay = activeAddr || 'Contact your admin.';
-  const qrSrc = activeAddr
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(isBsc ? activeAddr : `upi://pay?pa=${activeAddr}&pn=Qoption&cu=INR`)}`
-    : DEFAULT_QR_PNG;
 
   return `
   <div class="wallet-wrap">
@@ -562,21 +606,11 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
             `).join('')}
           </div>
 
-          <div class="qr-box-wrap">
-            <div class="qr-frame">
-              <img id="depQrImg" src="${esc(qrSrc)}" alt="Deposit QR Code" width="120" height="120">
-            </div>
-            <div>
-              <span class="dep-addr-row" id="depAddrText" data-action="client-copy-dep-addr" data-addr="${esc(addrDisplay)}" title="Click to copy">
-                <span>${esc(addrDisplay)}</span>
-                ${clientIcons.clipboard}
-              </span>
-            </div>
-          </div>
+          <div class="qr-box-wrap" id="depositPayment">${renderDepositPaymentHtml(home, state.depositMethod)}</div>
 
           <div class="field-stack" style="margin-top:18px;">
-            <label class="control-label" for="depProof">Upload Receipt Screenshot</label>
-            <input type="file" id="depProof" name="receipt" accept="image/*" class="replica-file-input">
+            <label class="control-label" for="depReferenceNumber">UTR or Reference Number</label>
+            <input type="text" id="depReferenceNumber" name="referenceNumber" class="replica-input" maxlength="128" value="${esc(state.depositReferenceNumber)}" autocomplete="off" spellcheck="false" required>
           </div>
 
           <button type="submit" class="replica-primary-btn">I HAVE PAID</button>
@@ -991,10 +1025,9 @@ export function renderNotificationsOverlayList(home: Home, state: ClientState) {
   }).join('');
 }
 
-export function renderNotifBannersHtml(home: Home, state: ClientState) {
-  const pending = state.notifications.filter(n => isNotifUnread(n, home) && String(n.type || '').toUpperCase() !== 'TRADE');
-  return pending.map(n => `
-    <div class="notif-banner-card">
+function renderNotifBannerHtml(n: Row) {
+  return `
+    <div class="notif-banner-card" data-notification-id="${esc(n.id)}">
       <div class="notif-banner-head">
         <div class="notif-banner-label">
           <span class="notif-banner-icon" aria-hidden="true">${clientIcons.bell}</span>
@@ -1006,7 +1039,105 @@ export function renderNotifBannersHtml(home: Home, state: ClientState) {
       <div class="notif-banner-body">${esc(n.message || '')}</div>
       <button type="button" class="replica-primary-btn notif-banner-btn" data-action="client-mark-notif-read" data-id="${esc(n.id)}">Mark as Read</button>
     </div>
-  `).join('');
+  `;
+}
+
+const notifBannerAnimations = new WeakMap<HTMLElement, Animation>();
+
+function cancelNotifBannerAnimation(card: HTMLElement) {
+  const animation = notifBannerAnimations.get(card);
+  if (animation) {
+    notifBannerAnimations.delete(card);
+    animation.cancel();
+    card.classList.remove('notif-banner-hidden');
+  }
+}
+
+function animateNotifBanner(banners: HTMLElement, bell: HTMLElement | null, card: HTMLElement, leaving: boolean) {
+  cancelNotifBannerAnimation(card);
+  if (leaving && card.contains(document.activeElement)) bell?.focus({ preventScroll: true });
+  const workspace = banners.parentElement;
+  if (!workspace || !bell || document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches || typeof card.animate !== 'function') {
+    if (leaving) card.remove();
+    return;
+  }
+
+  const rect = card.getBoundingClientRect();
+  const stack = banners.getBoundingClientRect();
+  const icon = bell.getBoundingClientRect();
+  const top = Math.max(rect.top, stack.top);
+  const bottom = Math.min(rect.bottom, stack.bottom);
+  if (!rect.width || !icon.width || bottom <= top) {
+    if (leaving) card.remove();
+    return;
+  }
+
+  const centerY = (top + bottom) / 2;
+  const x = icon.left + icon.width / 2 - (rect.left + rect.width / 2);
+  const y = icon.top + icon.height / 2 - centerY;
+  const scale = Math.min(0.16, icon.width / rect.width, icon.height / (bottom - top));
+  // The fixed clone can reach the bell above the scroll container while the card holds its space.
+  const clone = card.cloneNode(true) as HTMLElement;
+  clone.classList.add('notif-banner-animation');
+  clone.setAttribute('aria-hidden', 'true');
+  clone.inert = true;
+  Object.assign(clone.style, {
+    top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px`, height: `${rect.height}px`,
+    transformOrigin: `50% ${centerY - rect.top}px`, clipPath: `inset(${top - rect.top}px 0 ${rect.bottom - bottom}px 0)`,
+  });
+  workspace.append(clone);
+  card.classList.add('notif-banner-hidden');
+
+  const collapsed = { transform: `translate(${x}px, ${y}px) scale(${scale})`, opacity: 0 };
+  const expanded = { transform: 'none', opacity: 1 };
+  const animation = clone.animate(leaving ? [expanded, collapsed] : [collapsed, expanded], {
+    duration: leaving ? 260 : 360,
+    easing: leaving ? 'cubic-bezier(.4, 0, .8, .35)' : 'cubic-bezier(.2, .7, .25, 1)',
+    fill: 'both',
+  });
+  notifBannerAnimations.set(card, animation);
+  const finish = () => {
+    clone.remove();
+    if (notifBannerAnimations.get(card) !== animation) return;
+    notifBannerAnimations.delete(card);
+    if (leaving) card.remove();
+    else card.classList.remove('notif-banner-hidden');
+  };
+  void animation.finished.then(finish, finish);
+}
+
+export function updateNotifBanners(banners: HTMLElement, bell: HTMLElement | null, home: Home, state: ClientState) {
+  const pending = new Map(state.notifications
+    .filter(n => isNotifUnread(n, home) && String(n.type || '').toUpperCase() !== 'TRADE')
+    .map(n => [String(n.id), n]));
+  const cards = new Map(Array.from(banners.querySelectorAll<HTMLElement>('[data-notification-id]'), card => [card.dataset.notificationId!, card]));
+  for (const [id, card] of cards) {
+    if (!pending.has(id) && !card.hasAttribute('data-leaving')) {
+      card.setAttribute('data-leaving', '');
+      animateNotifBanner(banners, bell, card, true);
+    }
+  }
+
+  const added: HTMLElement[] = [];
+  let next = banners.firstElementChild;
+  for (const [id, row] of pending) {
+    let card = cards.get(id);
+    if (card) {
+      if (card.hasAttribute('data-leaving')) {
+        cancelNotifBannerAnimation(card);
+        card.removeAttribute('data-leaving');
+      }
+      while (next?.hasAttribute('data-leaving')) next = next.nextElementSibling;
+    } else {
+      const template = document.createElement('template');
+      template.innerHTML = renderNotifBannerHtml(row);
+      card = template.content.firstElementChild as HTMLElement;
+      added.push(card);
+    }
+    if (card !== next) banners.insertBefore(card, next);
+    next = card.nextElementSibling;
+  }
+  for (const card of added) animateNotifBanner(banners, bell, card, false);
 }
 
 export function renderAssetDropdownAndGrid(state: ClientState) {
@@ -1070,29 +1201,6 @@ export function downloadCsv(filename: string, headers: string[], rows: string[][
   URL.revokeObjectURL(url);
 }
 
-export async function fileToCompressedDataUrl(file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) throw new Error('Please upload an image file.');
-  if (file.size <= 180_000) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Could not read receipt image.'));
-      reader.readAsDataURL(file);
-    });
-  }
-  const bmp = await createImageBitmap(file);
-  const maxDim = 960;
-  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bmp.width * scale));
-  canvas.height = Math.max(1, Math.round(bmp.height * scale));
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas unavailable to process receipt.');
-  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  bmp.close();
-  return canvas.toDataURL('image/jpeg', 0.72);
-}
-
 export function renderTxnDetailHtml(home: Home, txn: Row) {
   const kind = String(txn.kind || '').toUpperCase();
   const status = String(txn.status || 'PENDING').toUpperCase();
@@ -1123,6 +1231,7 @@ export function renderTxnDetailHtml(home: Home, txn: Row) {
     <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--iq-muted);">Method</span><span>${esc(String(txn.method || '—'))}</span></div>
     <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--iq-muted);">Amount</span><strong>${esc(fmtMoney(txn.amount, home))}</strong></div>
     <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--iq-muted);">Status</span><strong>${esc(status)}</strong></div>
+    ${txn.referenceNumber ? `<div style="display:flex;justify-content:space-between;gap:12px;font-size:13px;"><span style="color:var(--iq-muted);">UTR or Reference Number</span><span style="text-align:right;overflow-wrap:anywhere;">${esc(txn.referenceNumber)}</span></div>` : ''}
     <div style="display:flex;justify-content:space-between;gap:12px;font-size:13px;"><span style="color:var(--iq-muted);">Reason / Note</span><span style="text-align:right;color:${status === 'REJECTED' ? '#ff8a99' : '#eef5fb'}">${esc(reason)}</span></div>
     ${detailRows ? `<div style="display:grid;gap:8px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--iq-border);border-radius:10px;">${detailRows}</div>` : ''}
     ${txn.receiptUrl ? `<button type="button" class="history-action-btn" data-action="client-open-receipt" data-url="${esc(String(txn.receiptUrl))}">View Receipt</button>` : ''}

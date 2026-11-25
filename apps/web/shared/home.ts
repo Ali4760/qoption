@@ -1,11 +1,13 @@
 import './style.css';
 import './public-shell';
 import './home.css';
-import { assets, findAsset, type Asset } from '../../../functions/src/market';
+import { assets, type Asset } from '../../../functions/src/market';
 import { formatPrice, mountChart, timeframes, type ChartMode } from './canvas-chart';
 
 type Quote = { last: number; open: number; high: number; change: number };
 type QuoteRow = { symbol: string; lastPrice?: string; openPrice?: string; highPrice?: string; priceChangePercent?: string };
+const watchlist = assets.filter(asset => asset.code === 'BTC' || asset.code === 'ETH' || asset.code === 'XRP');
+const watchlistSymbols = new Set<string>(watchlist.map(asset => asset.symbol));
 
 const list = document.querySelector<HTMLElement>('#home-market-list')!;
 const status = document.querySelector<HTMLElement>('#home-quote-status')!;
@@ -18,10 +20,10 @@ const open = document.querySelector<HTMLElement>('#home-open')!;
 const high = document.querySelector<HTMLElement>('#home-high')!;
 const change = document.querySelector<HTMLElement>('#home-change')!;
 const quoteURL = new URL('https://data-api.binance.vision/api/v3/ticker/24hr');
-quoteURL.searchParams.set('symbols', JSON.stringify(assets.map(asset => asset.symbol)));
+quoteURL.searchParams.set('symbols', JSON.stringify([...watchlistSymbols]));
 
 const quotes = new Map<string, Quote>();
-let current: Asset = assets[0];
+let current: Asset = watchlist[0];
 let interval = '5m';
 let mode: ChartMode = 'combined';
 let chart: ReturnType<typeof mountChart> | undefined;
@@ -38,7 +40,7 @@ function setChange(node: HTMLElement, value: number | undefined) {
   node.classList.toggle('neg', (value ?? 0) < 0);
 }
 
-list.innerHTML = assets.map(asset => '<button type="button" class="home-market-row" data-symbol="' + asset.symbol + '" aria-label="Select ' +
+list.innerHTML = watchlist.map(asset => '<button type="button" class="home-market-row" data-symbol="' + asset.symbol + '" aria-label="Select ' +
   asset.name + '" aria-pressed="' + (asset === current) + '">' +
   '<span class="home-market-pair"><strong>' + asset.code + '/USDT</strong><small>' + asset.name + '</small></span>' +
   '<span class="home-market-value"><strong data-role="quote-price">—</strong><small data-role="quote-change">—</small></span></button>').join('');
@@ -82,7 +84,7 @@ async function refreshQuotes() {
     if (!response.ok) throw new Error('Quotes unavailable');
     const rows = await response.json() as QuoteRow[];
     for (const row of rows) {
-      if (!findAsset(row.symbol)) continue;
+      if (!watchlistSymbols.has(row.symbol)) continue;
       const [last, openPrice, highPrice, percent] = [row.lastPrice, row.openPrice, row.highPrice, row.priceChangePercent].map(Number);
       if (![last, openPrice, highPrice, percent].every(Number.isFinite)) continue;
       quotes.set(row.symbol, { last, open: openPrice, high: highPrice, change: percent });
@@ -107,7 +109,7 @@ async function refreshQuotes() {
 
 list.addEventListener('click', event => {
   const button = (event.target as Element).closest<HTMLElement>('[data-symbol]');
-  const asset = findAsset(button?.dataset.symbol);
+  const asset = watchlist.find(item => item.symbol === button?.dataset.symbol);
   if (asset && asset !== current) chooseMarket(asset);
 });
 

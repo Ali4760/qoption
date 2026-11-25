@@ -67,7 +67,7 @@ form.addEventListener('submit', async event => {
       await updateProfile(account.user, { displayName: account.name });
     }
     await client.call('access', { name: account.name, inviteCode: account.inviteCode });
-    location.replace('/#trade');
+    location.replace('/login.html#trade');
   } catch (error) {
     status.textContent = account
       ? 'Your account is created. Retry to finish setting up your workspace.'

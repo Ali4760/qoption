@@ -399,11 +399,19 @@
   font-weight: 600;
 }
 
-#app-interface .chart-timeframes {
+#app-interface .chart-controls {
   display: flex;
   align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+  max-width: 100%;
+}
+
+#app-interface .chart-timeframes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  width: auto;
 }
 
 #app-interface .chart-timeframe {
@@ -426,6 +434,34 @@
   border-color: rgba(31, 214, 164, 0.34);
   background: rgba(31, 214, 164, 0.12);
   color: #5eefc4;
+}
+
+#app-interface .chart-mode-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--iq-border);
+  border-radius: 8px;
+  background: var(--iq-panel-2);
+  color: var(--iq-text);
+  cursor: pointer;
+}
+#app-interface .chart-mode-toggle:hover {
+  border-color: rgba(31, 214, 164, 0.34);
+  background: rgba(31, 214, 164, 0.12);
+  color: #5eefc4;
+}
+#app-interface:not(.market-active) .chart-mode-toggle {
+  display: none;
+}
+
+@media (max-width: 420px) {
+  #app-interface .chart-timeframe {
+    min-width: 36px;
+    padding-inline: 6px;
+  }
 }
 
 #app-interface .chart-plot {
@@ -887,34 +923,52 @@
   margin-top: 12px;
 }
 #app-interface .qr-frame {
-  background: var(--iq-input);
+  background: #fff;
   border: 1px solid var(--iq-border);
   padding: 10px;
   display: inline-block;
   border-radius: 12px;
 }
+#app-interface .qr-frame img {
+  display: block;
+  object-fit: contain;
+}
+#app-interface .deposit-payment-details {
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+#app-interface .deposit-payment-details dt,
+#app-interface .deposit-payment-empty {
+  color: var(--iq-muted);
+}
+#app-interface .deposit-payment-empty {
+  margin: 0;
+  font-size: 13px;
+}
+#app-interface .deposit-payment-details dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
 #app-interface .dep-addr-row {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--iq-green);
   font-family: monospace;
   font-size: 12px;
   font-weight: 800;
-  margin-top: 10px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  word-break: break-all;
 }
-
-#app-interface .replica-file-input {
-  width: 100%;
-  background: var(--iq-input);
-  border: 1px solid rgba(148, 178, 208, 0.2);
-  color: #9eb2c6;
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 13px;
+#app-interface .dep-addr-row svg {
+  flex-shrink: 0;
 }
 
 #app-interface .replica-primary-btn {
@@ -1483,6 +1537,14 @@
   color: #eef5fb;
   overflow-wrap: anywhere;
 }
+#app-interface .notif-banner-hidden {
+  visibility: hidden;
+}
+#app-interface .notif-banner-animation {
+  position: fixed;
+  z-index: 170;
+  pointer-events: none;
+}
 #app-interface .notif-banner-head {
   display: flex;
   flex-wrap: wrap;
@@ -1551,7 +1613,20 @@
   border-radius: 12px;
   font-size: 12px;
   line-height: 1.45;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+#app-interface .msg-convo-caption {
+  padding: 18px;
+  text-align: center;
+  color: var(--iq-muted);
+  font-size: 12px;
+}
+#app-interface .msg-time {
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: .8;
+  text-align: right;
 }
 #app-interface .msg-bubble.theirs {
   align-self: flex-start;
@@ -1564,13 +1639,13 @@
   color: #fff;
 }
 #app-interface .msg-reply-form {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   padding: 10px 14px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 #app-interface .msg-reply-form textarea {
-  flex: 1;
   min-height: 38px;
   max-height: 90px;
   resize: none;
@@ -1580,6 +1655,15 @@
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 13px;
+}
+#app-interface .msg-reply-form .form-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--iq-muted);
+  font-size: 12px;
+}
+#app-interface .msg-reply-form .form-status:empty {
+  display: none;
 }
 #app-interface .msg-send-btn {
   padding: 0 14px;

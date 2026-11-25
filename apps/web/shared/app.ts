@@ -3,36 +3,36 @@ import './login.css';
 import './workspace.css';
 import './admin.css';
 import './client-replica.css';
-import type { ChartMode } from './canvas-chart';
 import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail,
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
-import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, brandContent, chartFrames, coin, ledgerRows, marketScreen, messages, pair, title, userNav } from './screens';
-import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
+import { depositSettingsChanges, depositSettingsForm } from './admin-deposit';
+import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, brandContent, chartFrames, ledgerRows, messages, messageThread, pair, title, userNav } from './screens';
+import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type DepositSettings, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
-  clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, fileToCompressedDataUrl, filterTrades, filterTransactions,
-  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml, renderNotifBannersHtml,
-  renderNotificationsOverlayList, renderOrderBookHtml, renderTxnDetailHtml, validateBankDetails, type ClientState,
+  clientChartPresentation, clientIcons, clientNavItems, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
+  fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml,
+  renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderTxnDetailHtml, updateNotifBanners, validateBankDetails, type ClientState,
 } from './client-ui';
 
 const root = document.querySelector<HTMLElement>('#app')!;
+const startup = document.querySelector<HTMLElement>('#startup')!;
 const admin = root.dataset.audience === 'admin';
 const first = admin ? 'overview' : 'trade';
 let api: Awaited<ReturnType<typeof connect>>;
 let person: User | null;
 let home: Home | undefined;
 let roles: string[] = [];
-let access = false, guestMarket = false, version = 0, authVersion = 0, clockOffset = 0;
+let access = false, version = 0, authVersion = 0, clockOffset = 0;
 let route = first, selected: Asset = assets[0], frame = '1m';
 let chart: ReturnType<typeof import('./canvas-chart').mountChart> | undefined;
 let refreshTimer = 0, toastTimer = 0, quoteTimer = 0, activeTradeInt = 0, tradeSettling = false;
 let registration = !admin && new URLSearchParams(location.search).get('mode') === 'register';
 let resolver: MultiFactorResolver | undefined;
 let secret: TotpSecret | undefined;
-let clientSection = 'activity';
 let visibleRows = new Map<string, Row>();
 type List = { page: number; next: string | null; cursors: (string | null)[]; search: string; status: string };
 const lists = new Map<string, List>();
@@ -41,10 +41,13 @@ const adminCache = new Map<string, CachedAdminView>();
 const CACHE_TTL = 60_000;
 let syncUnsub: (() => void) | undefined;
 let syncInitialized = false;
-let prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0 };
+let prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0, messagesAt: 0 };
 let prevUserUpdatedAt = 0;
+let prevUserDepositSettingsAt = 0;
 let silentRefreshQueued = false;
 let silentRefreshActive = false;
+let clientMessagesRequest = 0;
+let clientNotificationsRequest = 0;
 
 const clientLoaded = { funding: false, trades: false, notifications: false, messages: false };
 const clientState: ClientState = {
@@ -52,8 +55,10 @@ const clientState: ClientState = {
   walletSubTab: 'deposit',
   depositMethod: 'USDT_BSC',
   depositPresetAmount: 3000,
+  depositReferenceNumber: '',
   selected: assets[0],
   frame: '1m',
+  chartMode: 'candles',
   selDur: 60,
   selProfit: 50,
   livePrice: demoPrice(assets[0], Date.now()),
@@ -79,6 +84,8 @@ const part = (i: number) => {
   try { return decodeURIComponent(location.hash.slice(1).split('/')[i] || ''); } catch { return ''; }
 };
 const clientId = () => part(1);
+const canChat = () => role('admin') || role('support');
+const clientSection = () => canChat() && part(2) === 'messages' ? 'messages' : 'activity';
 const content = () => root.querySelector<HTMLElement>('#content')!;
 const panel = () => root.querySelector<HTMLDialogElement>('#details')!;
 const routeName = () => nav().find(item => item[0] === route)?.[2] || 'Client details';
@@ -93,8 +100,9 @@ const stopSync = () => {
   syncUnsub?.();
   syncUnsub = undefined;
   syncInitialized = false;
-  prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0 };
+  prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0, messagesAt: 0 };
   prevUserUpdatedAt = 0;
+  prevUserDepositSettingsAt = 0;
   adminCache.clear();
   clientLoaded.funding = false;
   clientLoaded.trades = false;
@@ -106,11 +114,13 @@ const stopSync = () => {
   clientState.fundingRows = [];
   clientState.tradeRows = [];
   clientState.activeTrade = null;
+  clientState.depositReferenceNumber = '';
+  clientState.chartMode = 'candles';
 };
 const go = (target: string) => { if (location.hash === '#' + target) void render(); else location.hash = target; };
 const cents = (value: unknown) => Math.round(Number(value) * 100);
 function list(): List {
-  const key = route + (route === 'client' ? ':' + clientId() + ':' + clientSection : '');
+  const key = route + (route === 'client' ? ':' + clientId() + ':' + clientSection() : '');
   const saved = lists.get(key);
   if (saved) return saved;
   const initial: List = { page: 0, next: null, cursors: [null], search: '', status: 'pending' };
@@ -124,7 +134,7 @@ function adminCacheKey(targetRoute = route) {
   if (targetRoute === 'overview') return 'overview';
   if (targetRoute === 'clients') return 'clients:' + current.search + ':' + current.page;
   if (targetRoute === 'withdrawals' || targetRoute === 'deposits') return targetRoute + ':' + current.status + ':' + current.page;
-  if (targetRoute === 'client') return 'client:' + clientId() + ':' + clientSection + ':' + current.page;
+  if (targetRoute === 'client') return 'client:' + clientId() + ':' + clientSection() + ':' + current.page;
   return targetRoute + ':' + current.page;
 }
 function invalidateAdminCache(prefixes: string[]) {
@@ -150,7 +160,14 @@ function remember(page: Page, current: List) {
   current.next = page.cursor;
 }
 function setHome(value: Home) {
+  const previousDeposit = home?.depositSettings;
+  const nextDeposit = value.depositSettings;
   home = value; clockOffset = value.serverTime - Date.now();
+  const payment = root.querySelector('#depositPayment');
+  const depositFields = ['usdtBscAddress', 'upiId', 'upiName', 'upiQrImage', 'usdtBscQrImage'] as const;
+  if (payment && depositFields.some(field => previousDeposit?.[field] !== nextDeposit?.[field])) {
+    payment.innerHTML = renderDepositPaymentHtml(value, clientState.depositMethod);
+  }
   const balance = root.querySelector('#top-balance');
   if (balance) {
     balance.textContent = credits(value.wallet.available);
@@ -187,11 +204,10 @@ function definition(entries: [string, unknown][]) {
   return '<dl>' + entries.map(([name, value]) => '<dt>' + esc(name) + '</dt><dd>' + esc(value ?? '—') + '</dd>').join('') + '</dl>';
 }
 function showAuth(notice = '') {
-  guestMarket = false;
   stop();
   if (!admin) {
     root.innerHTML = userLogin({ registration, signedIn: !!person, remember: rememberPreference(), showQuickStart: emulator, notice }) + dialogShell;
-    void attachPublicChart('#login-chart', '#login-chart-status', false);
+    void attachLoginChart();
     return;
   }
   const heading = admin ? 'Admin sign-in' : registration ? 'Create your trading account' : 'Sign in';
@@ -207,31 +223,21 @@ function showAuth(notice = '') {
     (person && admin && !emulator ? '<button class="button secondary compact" data-action="enroll">Set up authenticator</button>' : '') +
     (person ? '<button class="button secondary compact" data-action="signout">Sign out</button>' : '') +
     (emulator && !person ? '<button class="button secondary" data-action="quick-start">Open trading workspace</button>' : '') +
-    '<a href="' + (admin ? '/' : '/admin/') + '">' + (admin ? 'User site' : 'Staff sign-in') + '</a></div><p id="auth-notice" class="form-status" role="status"></p>' + dialogShell + '</section></div>';
+    '</div><p id="auth-notice" class="form-status" role="status"></p>' + dialogShell + '</section></div>';
 }
-async function attachPublicChart(canvasSelector: string, statusSelector: string, live: boolean) {
-  const canvas = root.querySelector<HTMLCanvasElement>(canvasSelector);
-  const status = root.querySelector<HTMLElement>(statusSelector);
+async function attachLoginChart() {
+  const canvas = root.querySelector<HTMLCanvasElement>('#login-chart');
+  const status = root.querySelector<HTMLElement>('#login-chart-status');
   if (!canvas || !status) return;
   try {
-    const { mountChart, formatPrice } = await import('./canvas-chart');
+    const { mountChart } = await import('./canvas-chart');
     if (!canvas.isConnected) return;
-    const price = live ? root.querySelector<HTMLElement>('#market-price') : null;
-    chart = mountChart(canvas, status, value => { if (price) price.textContent = formatPrice(value); });
-    chart.load(live ? selected : assets[0], live ? frame : '5m', live);
-    if (!live) status.textContent = 'Live chart';
+    chart = mountChart(canvas, status, () => {});
+    chart.load(assets[0], '5m', false);
+    status.textContent = 'Live chart';
   } catch {
     if (status.isConnected) status.textContent = 'Chart unavailable';
   }
-}
-function showGuestMarket() {
-  if (admin || access || person) return;
-  stop();
-  guestMarket = true;
-  root.innerHTML = '<header class="guest-toolbar">' + brand +
-    '<button type="button" class="button secondary" data-action="back-to-login">Back to sign in</button></header>' +
-    '<main class="content">' + marketScreen(selected, frame) + '</main>' + dialogShell;
-  void attachPublicChart('#market-chart', '#feed-status', true);
 }
 function authNotice(message: string) {
   const node = root.querySelector('#auth-notice');
@@ -311,7 +317,7 @@ async function fetchLiveMarketQuotes() {
   } catch { /* Non-fatal fallback to demo quotes. */ }
 }
 
-function renderClientNotificationsUi() {
+function renderClientNotificationsUi(animate = true) {
   if (!home) return;
   const unread = clientState.notifications.filter(n => isNotifUnread(n, home!)).length;
   clientState.unreadNotifs = unread;
@@ -323,37 +329,59 @@ function renderClientNotificationsUi() {
   const listEl = root.querySelector<HTMLElement>('#notifList');
   if (listEl) listEl.innerHTML = renderNotificationsOverlayList(home, clientState);
   const banners = root.querySelector<HTMLElement>('#notifBanners');
-  if (banners) banners.innerHTML = renderNotifBannersHtml(home, clientState);
+  const bell = animate ? root.querySelector<HTMLElement>('[data-action="client-toggle-notif"]') : null;
+  if (banners) updateNotifBanners(banners, bell, home, clientState);
 }
 
 function renderClientMessagesUi() {
   const host = root.querySelector<HTMLElement>('#msgConvoList');
   if (!host) return;
   if (!clientState.messages.length) {
-    host.innerHTML = '<div style="padding:18px;text-align:center;color:var(--iq-muted);font-size:12px;">Start a conversation with Support below.</div>';
+    const prompt = clientLoaded.messages ? 'Start a conversation with Support below.' : 'Loading conversation…';
+    host.innerHTML = '<div class="msg-convo-caption">' + prompt + '</div>';
     return;
   }
-  host.innerHTML = [...clientState.messages].reverse().map(m => {
+  const html = [...clientState.messages].reverse().map(m => {
     const mine = String(m.sender || '') !== 'Support';
-    return `<div class="msg-bubble ${mine ? 'mine' : 'theirs'}">${esc(m.message)}<div style="font-size:9px;opacity:.7;margin-top:4px;text-align:right;">${esc(dateTime(m.createdAt))}</div></div>`;
+    return `<div class="msg-bubble ${mine ? 'mine' : 'theirs'}">${esc(m.message)}<div class="msg-time">${mine ? 'You' : 'Support'} · ${esc(dateTime(m.createdAt))}</div></div>`;
   }).join('');
+  if (host.innerHTML === html) return;
+  host.innerHTML = html;
   host.scrollTop = host.scrollHeight;
+}
+
+async function loadClientMessages() {
+  const run = ++clientMessagesRequest, session = authVersion;
+  try {
+    const result = await api.call<Page>('list', { list: 'messages' });
+    if (run !== clientMessagesRequest || session !== authVersion) return;
+    clientState.messages = result.rows;
+    clientLoaded.messages = true;
+    renderClientMessagesUi();
+  } catch {
+    const host = root.querySelector<HTMLElement>('#msgConvoList');
+    if (run === clientMessagesRequest && session === authVersion && host && !clientLoaded.messages) {
+      host.innerHTML = '<div class="msg-convo-caption">Unable to load messages. Close and reopen Support Messages to retry.</div>';
+    }
+  }
 }
 
 async function hydrateClientSidebarData() {
   if (admin || !access || !home) return;
+  const session = authVersion;
+  const request = ++clientNotificationsRequest;
+  const messagesRequest = loadClientMessages();
   try {
-    const [notifRes, msgRes] = await Promise.all([
-      api.call<Page>('list', { list: 'notifications' }),
-      api.call<Page>('list', { list: 'messages' }),
-    ]);
-    clientState.notifications = notifRes.rows;
-    clientState.messages = msgRes.rows;
-    clientLoaded.notifications = true;
-    clientLoaded.messages = true;
-    renderClientNotificationsUi();
-    renderClientMessagesUi();
+    const notifRes = await api.call<Page>('list', { list: 'notifications' });
+    if (session === authVersion && request === clientNotificationsRequest) {
+      const animate = clientLoaded.notifications;
+      const readIds = new Set(clientState.notifications.filter(n => n.read === true).map(n => String(n.id)));
+      clientState.notifications = notifRes.rows.map(n => readIds.has(String(n.id)) ? { ...n, read: true } : n);
+      clientLoaded.notifications = true;
+      renderClientNotificationsUi(animate);
+    }
   } catch { /* Non-fatal background sync. */ }
+  await messagesRequest;
 }
 
 function startActiveTradeCountdown(trade: { id: string; symbol: string; direction: string; stake: number; dueAt: number; profitPercent: number; entry: number }) {
@@ -522,34 +550,34 @@ function shell() {
     stop();
     root.innerHTML = buildClientShellHtml(home, clientState) + dialogShell + '<p id="toast" class="toast" role="status"></p>';
     updateClientQuoteDisplays();
-    renderClientNotificationsUi();
+    renderClientNotificationsUi(false);
     renderClientMessagesUi();
     void (async () => {
-      const { mountChart } = await import('./canvas-chart');
       const canvas = root.querySelector<HTMLCanvasElement>('#market-chart');
       const statusEl = root.querySelector<HTMLElement>('#feed-status');
       const markerEl = root.querySelector<HTMLElement>('#chartLiveMarker');
-      if (canvas && statusEl) {
-        chart = mountChart(canvas, statusEl, value => {
-          clientState.livePrice = value;
-          const ob = root.querySelector<HTMLElement>('#orderBookList');
-          if (ob && clientState.activeTab === 'market') ob.innerHTML = renderOrderBookHtml(value);
-          const bp = root.querySelector<HTMLElement>('#blindPrice');
-          if (bp && clientState.activeTrade) bp.textContent = value < 1 ? value.toFixed(5) : value.toFixed(4);
-        }, {
-          replica: true,
-          onMarker: pos => {
-            if (!markerEl) return;
-            if (!pos) { markerEl.style.display = 'none'; return; }
-            markerEl.style.display = 'block';
-            markerEl.style.left = `${pos.x}px`;
-            markerEl.style.top = `${pos.y}px`;
-            markerEl.classList.toggle('price-tick-up', pos.up);
-            markerEl.classList.toggle('price-tick-down', !pos.up);
-          },
-        });
-        chart.load(clientState.selected, clientState.frame, !emulator, clockOffset);
-      }
+      const { mountChart } = await import('./canvas-chart');
+      if (!canvas?.isConnected || !statusEl?.isConnected) return;
+      chart = mountChart(canvas, statusEl, value => {
+        clientState.livePrice = value;
+        const ob = root.querySelector<HTMLElement>('#orderBookList');
+        if (ob && clientState.activeTab === 'market') ob.innerHTML = renderOrderBookHtml(value);
+        const bp = root.querySelector<HTMLElement>('#blindPrice');
+        if (bp && clientState.activeTrade) bp.textContent = value < 1 ? value.toFixed(5) : value.toFixed(4);
+      }, {
+        replica: true,
+        onMarker: pos => {
+          if (!markerEl) return;
+          if (!pos) { markerEl.style.display = 'none'; return; }
+          markerEl.style.display = 'block';
+          markerEl.style.left = `${pos.x}px`;
+          markerEl.style.top = `${pos.y}px`;
+          markerEl.classList.toggle('price-tick-up', pos.up);
+          markerEl.classList.toggle('price-tick-down', !pos.up);
+        },
+      });
+      chart.setMode(clientState.chartMode);
+      chart.load(clientState.selected, clientState.frame, !emulator, clockOffset);
       await fetchLiveMarketQuotes();
       quoteTimer = window.setInterval(() => { if (!document.hidden) void fetchLiveMarketQuotes(); }, 20000);
     })();
@@ -595,6 +623,7 @@ function startRealtimeSync() {
         fundingAt: Number(data.fundingAt || 0),
         clientsAt: Number(data.clientsAt || 0),
         auditAt: Number(data.auditAt || 0),
+        messagesAt: Number(data.messagesAt || 0),
       };
       if (!syncInitialized) {
         prevAdminSync = next;
@@ -605,12 +634,14 @@ function startRealtimeSync() {
       const fundingChanged = next.fundingAt > prevAdminSync.fundingAt;
       const clientsChanged = next.clientsAt > prevAdminSync.clientsAt;
       const auditChanged = next.auditAt > prevAdminSync.auditAt;
+      const messagesChanged = canChat() && next.messagesAt !== prevAdminSync.messagesAt;
       prevAdminSync = next;
 
       if (tradesChanged) invalidateAdminCache(['trades', 'overview']);
       if (fundingChanged) invalidateAdminCache(['withdrawals', 'deposits', 'overview']);
       if (clientsChanged) invalidateAdminCache(['clients', 'client', 'overview']);
       if (auditChanged) invalidateAdminCache(['audit']);
+      if (messagesChanged) invalidateAdminCache(['clients', 'client']);
 
       if (fundingChanged && route !== 'overview') {
         void refreshAdminBadges();
@@ -619,6 +650,7 @@ function startRealtimeSync() {
         (route === 'overview' && (tradesChanged || fundingChanged || clientsChanged)) ||
         (route === 'trades' && tradesChanged) ||
         ((route === 'clients' || route === 'client') && clientsChanged) ||
+        (messagesChanged && (route === 'clients' || (route === 'client' && clientSection() === 'messages'))) ||
         ((route === 'withdrawals' || route === 'deposits') && fundingChanged) ||
         (route === 'audit' && auditChanged);
 
@@ -630,16 +662,25 @@ function startRealtimeSync() {
     const uid = person.uid;
     syncUnsub = api.watchUserSync(uid, data => {
       const nextAt = Number(data.updatedAt || 0);
+      const depositSettingsAt = Number(data.depositSettingsAt || 0);
+      const depositSettingsChanged = depositSettingsAt > prevUserDepositSettingsAt;
+      if (depositSettingsChanged) prevUserDepositSettingsAt = depositSettingsAt;
       if (!syncInitialized) {
         prevUserUpdatedAt = nextAt;
         syncInitialized = true;
+        if (depositSettingsChanged) void silentRefreshUserView();
         return;
       }
-      if (nextAt <= prevUserUpdatedAt) return;
-      prevUserUpdatedAt = nextAt;
+      if (nextAt <= prevUserUpdatedAt && !depositSettingsChanged) return;
+      prevUserUpdatedAt = Math.max(prevUserUpdatedAt, nextAt);
       void silentRefreshUserView();
     });
   }
+}
+
+function setStartupVisible(visible: boolean) {
+  startup.hidden = !visible;
+  root.inert = visible;
 }
 
 async function start() {
@@ -647,10 +688,11 @@ async function start() {
     api = await connect(admin ? 'admin' : 'user');
     onAuthStateChanged(api.auth, async user => {
       const latest = ++authVersion;
-      version++; stop(); stopSync(); access = false; guestMarket = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
+      version++; stop(); stopSync(); access = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
       person = user; resolver = undefined; secret = undefined;
-      if (!user) { showAuth(); return; }
-      root.innerHTML = '<p class="boot">Opening workspace…</p>';
+      if (!user) { showAuth(); setStartupVisible(false); return; }
+      setStartupVisible(true);
+      root.replaceChildren();
       try {
         if (admin) {
           const data = await api.call<{ roles: string[] }>('admin.access');
@@ -662,9 +704,16 @@ async function start() {
           setHome(data);
         }
         access = true; shell(); startRealtimeSync(); if (admin) void refreshAdminBadges(); await render();
-      } catch (error) { if (latest === authVersion) showAuth(errorMessage(error)); }
+      } catch (error) {
+        if (latest === authVersion) showAuth(errorMessage(error));
+      } finally {
+        if (latest === authVersion) setStartupVisible(false);
+      }
     });
-  } catch (error) { root.innerHTML = '<main class="content">' + title('Workspace unavailable', errorMessage(error)) + '</main>'; }
+  } catch (error) {
+    root.innerHTML = '<main class="content">' + title('Workspace unavailable', errorMessage(error)) + '</main>';
+    setStartupVisible(false);
+  }
 }
 type ClientBundle = { data: { profile: Profile; wallet: Wallet | null; activity: Page }; page: Page };
 type OverviewData = Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string };
@@ -680,13 +729,14 @@ function clientSummaryHtml(data: ClientBundle['data']) {
   return balance + identity;
 }
 function clientActivityBodyHtml(uid: string, data: ClientBundle['data'], page: Page) {
-  const thread = clientSection === 'messages';
+  const thread = clientSection() === 'messages';
   return '<div class="filters" role="group" aria-label="Client activity view">' +
     '<button type="button" class="button secondary compact" data-action="client-tab" data-id="activity" aria-pressed="' + String(!thread) + '">Activity</button>' +
-    (role('support') ? '<button type="button" class="button secondary compact" data-action="client-tab" data-id="messages" aria-pressed="' +
+    (canChat() ? '<button type="button" class="button secondary compact" data-action="client-tab" data-id="messages" aria-pressed="' +
       String(thread) + '">Messages</button>' : '') + '</div>' +
     (thread ? messages(page.rows, uid) : data.wallet ? ledgerRows(page.rows) : table(['Sender', 'Message', 'Date'],
-      page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) + navigation();
+      page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) +
+    '<div id="client-activity-pager">' + navigation() + '</div>';
 }
 function buildClientDetailHtml(bundle: ClientBundle) {
   const uid = clientId(), { data, page } = bundle;
@@ -695,7 +745,7 @@ function buildClientDetailHtml(bundle: ClientBundle) {
     (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') +
     (role('finance') ? actionButton('adjustment', uid, 'Adjust credits') : '') + '</div>' +
     '<div class="admin-client-summary" id="client-summary-panel">' + clientSummaryHtml(data) + '</div>' +
-    '<section class="panel" id="client-activity-panel"><header class="panel-heading"><h2>Client activity</h2></header>' +
+    '<section class="panel" id="client-activity-panel"><header class="panel-heading"><h2>' + (clientSection() === 'messages' ? 'Support chat' : 'Client activity') + '</h2></header>' +
     '<div id="client-activity-body">' + clientActivityBodyHtml(uid, data, page) + '</div></section>';
 }
 
@@ -734,6 +784,8 @@ function clientRowCells(row: Row, index: number, startId: number) {
   const isFrozen = row.frozen === true;
   const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
   const uid = String(row.id || '');
+  const chatPending = row.supportNeedsReply === true;
+  const chatLabel = chatPending ? 'Chat with client · Awaiting reply' : 'Chat with client';
   const shortUid = uid.slice(0, 8).toUpperCase();
   const displayId = '#' + (startId - index);
   const vipRaw = String(row.vipLevel || 'VIP1');
@@ -754,9 +806,12 @@ function clientRowCells(row: Row, index: number, startId: number) {
       '<button type="button" class="trade-pill trade-loss' + (mode === 'loss' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="loss">Loss</button>' +
     '</div>',
     '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">' + adminActionIcons.report + '</button>' +
+    (canChat() ? '<button type="button" class="icon-action-btn' + (chatPending ? ' chat-pending' : '') + '" data-action="client-chat" data-id="' + esc(uid) +
+      '" title="' + chatLabel + '" aria-label="' + chatLabel + '">' + adminActionIcons.chat + '</button>' : '') +
     '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">' + adminActionIcons.wallet + '</button>' +
     '<button type="button" class="icon-action-btn" data-action="notify-client" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Push notification">' + adminActionIcons.bell + '</button>' +
-    '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">' + adminActionIcons.edit + '</button>',
+    '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">' + adminActionIcons.edit + '</button>' +
+    (role('admin') ? '<button type="button" class="icon-action-btn" data-action="deposit-settings" data-id="' + esc(uid) + '" title="Update deposit QR codes" aria-label="Update deposit QR codes">' + adminActionIcons.qrCode + '</button>' : ''),
   ];
 }
 function clientRowHtml(row: Row, index: number, startId: number) {
@@ -930,7 +985,7 @@ async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ 
     return { payload: values, rows: [...values.recent, ...values.pending], next: null };
   }
   if (targetRoute === 'client') {
-    const uid = clientId(), thread = clientSection === 'messages';
+    const uid = clientId(), thread = clientSection() === 'messages';
     const data = await api.call<{ profile: Profile; wallet: Wallet | null; activity: Page }>('admin.client', { uid, cursor: thread ? null : current.cursors[current.page] });
     const page = thread ? await api.call<Page>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
     return { payload: { data, page }, rows: page.rows, next: page.cursor, clientRow: { ...data.profile, id: uid } };
@@ -1014,6 +1069,15 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
     if (!summary || !activityBody) return false;
     const nextSummary = clientSummaryHtml(bundle.data);
     if (summary.innerHTML !== nextSummary) summary.innerHTML = nextSummary;
+    const thread = activityBody.querySelector<HTMLElement>('#client-message-thread');
+    const pagerHost = activityBody.querySelector<HTMLElement>('#client-activity-pager');
+    if (clientSection() === 'messages' && thread && pagerHost) {
+      const threadHtml = messageThread(bundle.page.rows, clientId());
+      if (thread.innerHTML !== threadHtml) thread.innerHTML = threadHtml;
+      const pagerHtml = navigation();
+      if (pagerHost.innerHTML !== pagerHtml) pagerHost.innerHTML = pagerHtml;
+      return true;
+    }
     const nextActivity = clientActivityBodyHtml(clientId(), bundle.data, bundle.page);
     if (activityBody.innerHTML !== nextActivity) activityBody.innerHTML = nextActivity;
     return true;
@@ -1058,8 +1122,10 @@ async function silentRefreshCurrentRoute(button?: HTMLElement) {
   const spinner = button?.closest<HTMLElement>('.refresh-btn') || button;
   spinner?.classList.add('is-spinning');
   const activeRoute = route, activeKey = adminCacheKey(activeRoute), activeVersion = version;
+  const activeSession = authVersion;
   try {
     const result = await fetchAdminPayload(activeRoute, list());
+    if (!access || activeSession !== authVersion) return;
     adminCache.set(activeKey, { key: activeKey, route: activeRoute, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
     if (activeVersion === version && adminCacheKey(route) === activeKey) {
       applyCachedRows(result.rows, result.next, result.clientRow);
@@ -1223,37 +1289,26 @@ async function executeClientTrade(dir: 'up' | 'down', amountRupees: number, durS
 }
 
 function updateMarket() {
-  if (!admin && home) {
-    clientState.selected = selected;
-    clientState.frame = frame;
-    const hAsset = root.querySelector('#headerAsset');
-    if (hAsset) hAsset.textContent = selected.code.slice(0, 2) + '...';
-    const sAsset = root.querySelector('#selectedAssetName');
-    if (sAsset) sAsset.textContent = formatPair(selected.symbol);
-    const cMarket = root.querySelector('#chartMarketName');
-    if (cMarket) cMarket.textContent = formatPair(selected.symbol);
-    // Update the header icon: replace entire asset-btn-desk icon area
-    const hIconWrap = root.querySelector<HTMLElement>('.asset-btn-desk .asset-pill-icon, .asset-btn-desk .asset-pill-dot');
-    if (hIconWrap) hIconWrap.outerHTML = coinIcon(selected.code, selected.color);
-    const sDot = root.querySelector<HTMLElement>('#assetDotSmall');
-    if (sDot) { sDot.textContent = selected.code.slice(0, 2); sDot.style.background = selected.color; }
-    for (const btn of root.querySelectorAll<HTMLElement>('[data-action="frame"]')) {
-      const active = btn.dataset.id === frame;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', String(active));
-    }
-    chart?.load(selected, frame, !emulator, clockOffset);
-    updateClientQuoteDisplays();
-    return;
+  if (admin || !home) return;
+  clientState.selected = selected;
+  clientState.frame = frame;
+  const hAsset = root.querySelector('#headerAsset');
+  if (hAsset) hAsset.textContent = selected.code.slice(0, 2) + '...';
+  const sAsset = root.querySelector('#selectedAssetName');
+  if (sAsset) sAsset.textContent = formatPair(selected.symbol);
+  const cMarket = root.querySelector('#chartMarketName');
+  if (cMarket) cMarket.textContent = formatPair(selected.symbol);
+  const hIconWrap = root.querySelector<HTMLElement>('.asset-btn-desk .asset-pill-icon, .asset-btn-desk .asset-pill-dot');
+  if (hIconWrap) hIconWrap.outerHTML = coinIcon(selected.code, selected.color);
+  const sDot = root.querySelector<HTMLElement>('#assetDotSmall');
+  if (sDot) { sDot.textContent = selected.code.slice(0, 2); sDot.style.background = selected.color; }
+  for (const btn of root.querySelectorAll<HTMLElement>('[data-action="frame"]')) {
+    const active = btn.dataset.id === frame;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
   }
-  const header = root.querySelector('#chart-market');
-  if (header) header.innerHTML = coin(selected) + '<div><h2>' + pair(selected.symbol) + '</h2><small>' + selected.name + '</small></div>';
-  const ticket = root.querySelector('#ticket-pair'); if (ticket) ticket.textContent = selected.code + '/USDT';
-  const price = root.querySelector('#market-price'); if (price) price.textContent = '—';
-  const selector = root.querySelector<HTMLSelectElement>('#asset-select'); if (selector) selector.value = selected.symbol;
-  for (const button of root.querySelectorAll<HTMLElement>('[data-action="asset"], [data-action="frame"]')) button.setAttribute('aria-pressed',
-    String(button.dataset.id === (button.dataset.action === 'asset' ? selected.symbol : frame)));
-  chart?.load(selected, frame, guestMarket || route === 'assets', clockOffset);
+  chart?.load(selected, frame, !emulator, clockOffset);
+  updateClientQuoteDisplays();
 }
 
 function details(action: string, row: Row) {
@@ -1280,6 +1335,7 @@ function details(action: string, row: Row) {
     ['Reference', recordReference(row.id)],
     ['Type', label(row.kind)],
     ['Method', row.method || '—'],
+    ...(row.referenceNumber ? [['UTR / Reference number', row.referenceNumber] as [string, unknown]] : []),
     ['Amount', '₹' + credits(row.amount)],
     ['Status', label(row.status)],
     ['Submitted', dateTime(row.createdAt)],
@@ -1303,6 +1359,23 @@ function details(action: string, row: Row) {
       '<form data-form="funding.cancel"><input type="hidden" name="id" value="' + id + '"><button class="button secondary">Cancel withdrawal</button>' + formStatus() + '</form>' : ''));
   }
 }
+async function openDepositSettings(uid: string) {
+  const row = visibleRows.get(uid);
+  if (!row) return;
+  dialog('Deposit payment settings', '<p class="quiet" id="deposit-settings-loading" role="status">Loading payment settings…</p>');
+  const box = panel();
+  const loading = box.querySelector<HTMLElement>('#deposit-settings-loading')!;
+  try {
+    const { depositSettings } = await api.call<{ depositSettings: DepositSettings }>('admin.depositSettings', { uid });
+    if (box.open && loading.isConnected) {
+      loading.outerHTML = depositSettingsForm(uid, String(row.name || 'this client'), depositSettings);
+    }
+  } catch (error) {
+    loading.className = 'error';
+    loading.textContent = errorMessage(error);
+  }
+}
+
 function clientAction(action: string, id: string) {
   const target = visibleRows.get('@client');
   if (!target || target.id !== id) return;
@@ -1343,8 +1416,10 @@ window.matchMedia('(max-width: 680px)').addEventListener('change', event => {
 });
 
 async function loadClientNotifications(uid: string) {
-  const container = panel().querySelector<HTMLElement>('#client-notifications-list');
-  if (!container) return;
+  const box = panel();
+  const container = box.querySelector<HTMLElement>('#client-notifications-list');
+  const client = box.querySelector<HTMLInputElement>('form[data-form="admin.notifications.push"] input[name="uid"]');
+  if (!container || client?.value !== uid) return;
   container.innerHTML = '<p class="quiet" style="margin:8px 0">Loading notification records…</p>';
   try {
     const res = await api.call<{ rows: Row[] }>('admin.notifications.list', { uid });
@@ -1359,7 +1434,10 @@ async function loadClientNotifications(uid: string) {
       '<p>' + esc(item.message) + '</p>' +
       '<small>' + dateTime(item.createdAt) + '</small>' +
       '</div>' +
+      '<div class="notif-record-actions">' +
       '<button type="button" class="icon-action-btn reject-btn notif-delete-btn" data-action="delete-notification" data-id="' + esc(item.id) + '" data-uid="' + esc(uid) + '" title="Remove notification">' + adminActionIcons.trash + '</button>' +
+      '<button type="button" class="button secondary compact" data-action="reuse-notification">Push Again</button>' +
+      '</div>' +
       '</div>'
     ).join('');
   } catch (error) {
@@ -1394,8 +1472,6 @@ root.addEventListener('click', async event => {
       case 'dismiss-menu': dismissNavigation(true); break;
       case 'signout': await signOut(api.auth); break;
       case 'registration': registration = !registration; showAuth(); break;
-      case 'guest-market': showGuestMarket(); break;
-      case 'back-to-login': registration = false; showAuth(); break;
       case 'password-visibility': {
         const password = root.querySelector<HTMLInputElement>('#login-password');
         if (!password) break;
@@ -1456,6 +1532,19 @@ root.addEventListener('click', async event => {
         break;
       }
       case 'frame': if (chartFrames.includes(id)) { frame = id; clientState.frame = id; updateMarket(); } break;
+      case 'client-toggle-chart-mode': {
+        if (admin || !access || clientState.activeTab !== 'market') break;
+        clientState.chartMode = clientChartPresentation(clientState.chartMode).nextMode;
+        const presentation = clientChartPresentation(clientState.chartMode);
+        chart?.setMode(clientState.chartMode);
+        target.innerHTML = presentation.toggleIcon;
+        target.setAttribute('aria-label', presentation.toggleLabel);
+        target.title = presentation.toggleLabel;
+        const subtitle = root.querySelector('.chart-market-subtitle');
+        if (subtitle) subtitle.textContent = presentation.subtitle;
+        root.querySelector('#market-chart')?.setAttribute('aria-label', presentation.canvasLabel);
+        break;
+      }
       case 'client-menu-toggle': {
         const sb = root.querySelector('#mobileSidebar');
         const ov = root.querySelector('#mobileOverlay');
@@ -1500,19 +1589,12 @@ root.addEventListener('click', async event => {
       }
       case 'client-copy-dep-addr': {
         const addr = target.dataset.addr || '';
-        if (addr && addr !== 'Contact your admin.') {
+        if (addr) {
           await navigator.clipboard.writeText(addr);
           clientAlert('Copied', 'Payment address copied to clipboard.');
-        } else {
-          clientAlert('Notice', 'Please contact admin or Support for active payment details.');
         }
         break;
       }
-      case 'client-contact-support':
-        root.querySelector('#notifOverlay')?.classList.remove('open');
-        root.querySelector('#msgOverlay')?.classList.add('open');
-        renderClientMessagesUi();
-        break;
       case 'client-autofill-bank': {
         const saved = home?.profile.savedBank;
         if (!saved || !Object.keys(saved).length) {
@@ -1532,11 +1614,19 @@ root.addEventListener('click', async event => {
         root.querySelector('#msgOverlay')?.classList.remove('open');
         root.querySelector('#notifOverlay')?.classList.toggle('open');
         break;
-      case 'client-toggle-msgs':
+      case 'client-contact-support':
+      case 'client-toggle-msgs': {
         root.querySelector('#notifOverlay')?.classList.remove('open');
-        root.querySelector('#msgOverlay')?.classList.toggle('open');
-        renderClientMessagesUi();
+        const overlay = root.querySelector('#msgOverlay');
+        const opening = action === 'client-contact-support' || !overlay?.classList.contains('open');
+        overlay?.classList.toggle('open', opening);
+        if (opening) {
+          renderClientMessagesUi();
+          overlay?.querySelector('textarea')?.focus();
+          void loadClientMessages();
+        }
         break;
+      }
       case 'client-close-overlays':
         root.querySelector('#notifOverlay')?.classList.remove('open');
         root.querySelector('#msgOverlay')?.classList.remove('open');
@@ -1685,8 +1775,8 @@ root.addEventListener('click', async event => {
           ]));
         break;
       }
-      case 'client': clientSection = 'activity'; go('client/' + encodeURIComponent(id)); break;
-      case 'client-tab': clientSection = id === 'messages' ? 'messages' : 'activity'; await render(); break;
+      case 'client': go('client/' + encodeURIComponent(id)); break;
+      case 'client-tab': go('client/' + encodeURIComponent(clientId()) + (id === 'messages' && canChat() ? '/messages' : '')); break;
       case 'next': { const current = list(); if (current.next) { current.cursors[current.page + 1] = current.next; current.page++; await render(); } break; }
       case 'previous': if (list().page > 0) { list().page--; await render(); } break;
       case 'restrictions': case 'adjustment': clientAction(action, id); break;
@@ -1769,6 +1859,7 @@ root.addEventListener('click', async event => {
         if (!box.open) box.showModal();
         break;
       }
+      case 'deposit-settings': await openDepositSettings(id); break;
       case 'edit-client': {
         const row = visibleRows.get(id);
         if (!row) { toast('Client data not loaded. Try refreshing.'); break; }
@@ -1869,6 +1960,22 @@ root.addEventListener('click', async event => {
         void loadClientNotifications(id);
         break;
       }
+      case 'reuse-notification': {
+        const form = panel().querySelector<HTMLFormElement>('form[data-form="admin.notifications.push"]');
+        if (!form || form.dataset.busy) break;
+        const copy = target.closest('.notif-record-card')?.querySelector('.notif-record-copy');
+        const title = form.querySelector<HTMLInputElement>('input[name="title"]');
+        const message = form.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+        if (!copy || !title || !message) break;
+        const nextTitle = copy.querySelector('strong')?.textContent ?? '';
+        const nextMessage = copy.querySelector('p')?.textContent ?? '';
+        if (title.value !== nextTitle || message.value !== nextMessage) delete form.dataset.operationId;
+        title.value = nextTitle;
+        message.value = nextMessage;
+        showFormStatus(form, '');
+        title.focus();
+        break;
+      }
       case 'delete-notification': {
         const uid = target.dataset.uid || '';
         await api.call('admin.notifications.delete', { id, uid, requestId: crypto.randomUUID() });
@@ -1877,7 +1984,10 @@ root.addEventListener('click', async event => {
         if (uid) void loadClientNotifications(uid);
         break;
       }
-      case 'client-messages-modal': clientSection = 'messages'; go('client/' + encodeURIComponent(id)); break;
+      case 'client-chat':
+        lists.delete('client:' + id + ':messages');
+        go('client/' + encodeURIComponent(id) + '/messages');
+        break;
       case 'new-client': {
         const box = panel();
         box.innerHTML = '<h2 id="detail-heading">Register New Client</h2>' +
@@ -1936,7 +2046,6 @@ root.addEventListener('click', event => {
 
 root.addEventListener('change', event => {
   const node = event.target as HTMLSelectElement;
-  if (node.id === 'asset-select') { const asset = findAsset(node.value); if (asset) { selected = asset; updateMarket(); } }
   if (node.id === 'funding-status') { list().status = node.value; resetList(); void render(); }
   if (!admin && node.id === 'wdCountry') {
     clientState.bankCountry = node.value || 'India';
@@ -1985,6 +2094,7 @@ root.addEventListener('input', event => {
     }, 380);
   }
   if (!admin && target instanceof HTMLInputElement) {
+    if (target.id === 'depReferenceNumber') clientState.depositReferenceNumber = target.value;
     if (target.id === 'customDepAmt') {
       clientState.depositPresetAmount = Number(target.value || 0);
       for (const b of root.querySelectorAll<HTMLElement>('.amt-btn')) {
@@ -2016,10 +2126,6 @@ root.addEventListener('input', event => {
     }
   }
 });
-function confirmTrade(values: Record<string, FormDataEntryValue>, direction: string) {
-  openClientTradeConfirm(direction === 'down' ? 'down' : 'up');
-  void values;
-}
 async function signIn(values: Record<string, FormDataEntryValue>) {
   const email = String(values.email), password = String(values.password);
   if (!admin) await setRememberPreference(api.auth, values.remember === 'on');
@@ -2061,7 +2167,6 @@ root.addEventListener('submit', async event => {
   if (!op) return;
   event.preventDefault(); if (form.dataset.busy) return;
   const values = Object.fromEntries(new FormData(form));
-  if (op === 'prepare-trade') { confirmTrade(values, ((event as SubmitEvent).submitter as HTMLButtonElement | null)?.value || 'up'); return; }
   const buttons = Array.from(form.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.disabled);
   form.dataset.busy = 'true';
   buttons.forEach(button => { button.disabled = true; });
@@ -2071,30 +2176,47 @@ root.addEventListener('submit', async event => {
     if (await accountForm(op, values, form)) return;
     if (op === 'search') { window.clearTimeout(searchDebounceTimer); await refreshClientsSearch(String(values.search || '')); return; }
 
+    if (op === 'admin.depositSettings.update') {
+      const changes = await depositSettingsChanges(form, values);
+      if (!Object.keys(changes).length) {
+        showFormStatus(form, 'No changes to save.');
+        return;
+      }
+      if (!form.isConnected || !panel().open || started !== version) return;
+      await api.call(op, { uid: String(values.uid), ...changes, requestId: form.dataset.operationId ||= crypto.randomUUID() });
+      if (started !== version) return;
+      invalidateAdminCache(['audit']);
+      if (form.isConnected && panel().open) panel().close();
+      toast('Deposit payment settings saved.');
+      return;
+    }
+
     if (op === 'client.deposit') {
       const amt = Number(values.amount || clientState.depositPresetAmount || 0);
       if (!Number.isFinite(amt) || amt < 1) throw new Error('Please enter a valid deposit amount.');
-      const proofInput = form.querySelector<HTMLInputElement>('#depProof');
-      const file = proofInput?.files?.[0];
-      if (!file) throw new Error('Please upload the receipt screenshot.');
-      const receiptUrl = await fileToCompressedDataUrl(file);
+      const referenceNumber = String(values.referenceNumber || '').trim();
+      if (!referenceNumber || referenceNumber.length > 128) throw new Error('Enter a UTR or reference number up to 128 characters.');
       const methodLabel = clientState.depositMethod === 'UPI' ? 'UPI / BANK' : 'USDT (BNB Smart Chain)';
+      const account = authVersion;
       await api.call('funding.request', {
         kind: 'deposit',
         amount: cents(amt),
         method: methodLabel,
         note: 'Deposit submitted via ' + methodLabel,
-        receiptUrl,
+        referenceNumber,
         requestId: form.dataset.operationId ||= crypto.randomUUID(),
       });
+      if (account !== authVersion) return;
       delete form.dataset.operationId;
-      form.reset();
+      if (clientState.depositReferenceNumber.trim() === referenceNumber) {
+        clientState.depositReferenceNumber = '';
+        const referenceInput = root.querySelector<HTMLInputElement>('#depReferenceNumber');
+        if (referenceInput) referenceInput.value = '';
+      }
       clientLoaded.funding = false;
-      const updated = await api.call<Home>('home');
-      setHome(updated);
       void refreshClientTabData('history', true);
       void hydrateClientSidebarData();
-      clientAlert('Success', 'Deposit request submitted. Funds will be credited soon.');
+      clientAlert('Success', 'Deposit request submitted for review.');
       return;
     }
 
@@ -2168,6 +2290,18 @@ root.addEventListener('submit', async event => {
       void loadClientNotifications(String(values.uid || ''));
       return;
     }
+    if (op === 'message.send' || op === 'admin.message.send') {
+      const composer = form.querySelector('textarea[name="message"]');
+      if (composer instanceof HTMLTextAreaElement && composer.value === values.message) form.reset();
+      showFormStatus(form, 'Message sent.');
+      if (op === 'admin.message.send') {
+        invalidateAdminCache(['clients', 'client']);
+        await silentRefreshCurrentRoute();
+      } else {
+        await loadClientMessages();
+      }
+      return;
+    }
     panel().close();
     if (!admin) { const updated = await api.call<Home>('home'); if (started === version) setHome(updated); }
     if (started !== version) return;
@@ -2191,11 +2325,6 @@ root.addEventListener('submit', async event => {
         clientAlert('Success', 'Profile updated successfully.');
         return;
       }
-      if (op === 'message.send') {
-        form.reset();
-        await hydrateClientSidebarData();
-        return;
-      }
       if (op === 'funding.cancel') {
         root.querySelector('#transactionDetailOverlay')?.classList.remove('open');
         clientLoaded.funding = false;
@@ -2206,9 +2335,9 @@ root.addEventListener('submit', async event => {
       }
       await render();
     }
-    toast(op === 'trade.place' ? 'Trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
+    toast(op === 'trade.place' ? 'Trade placed.' : 'Changes saved.');
   } catch (error) {
-    if (!admin && access) clientAlert('Error', errorMessage(error));
+    if (!admin && access && op !== 'message.send') clientAlert('Error', errorMessage(error));
     else showFormStatus(form, errorMessage(error));
   }
   finally { delete form.dataset.busy; buttons.forEach(button => { button.disabled = false; }); }
@@ -2230,7 +2359,6 @@ window.addEventListener('pagehide', stop);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   if (access) void render();
-  else if (guestMarket) void attachPublicChart('#market-chart', '#feed-status', true);
-  else if (!admin) void attachPublicChart('#login-chart', '#login-chart-status', false);
+  else if (!admin) void attachLoginChart();
 });
 void start();

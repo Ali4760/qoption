@@ -1,0 +1,46 @@
+@font-face {
+  font-family: "Workspace Syne";
+  src: url("../assets/syne-latin.woff2?no-inline") format("woff2");
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+}
+
+.startup-screen:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #060b12;
+}
+
+.startup-wordmark {
+  --startup-ink: #eef5fb;
+  color: var(--startup-ink);
+  font: 800 clamp(2rem, 8vw, 3.5rem)/1.2 "Workspace Syne", system-ui, sans-serif;
+  letter-spacing: -.04em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (background-clip: text) {
+    .startup-wordmark {
+      background: linear-gradient(
+        105deg,
+        var(--startup-ink) 41%,
+        #27e395 47%,
+        #aaffd1 50%,
+        #26df8f 54%,
+        var(--startup-ink) 60%
+      ) 100% center / 260% 100% no-repeat;
+      background-clip: text;
+      color: transparent;
+      animation: startup-shine 1.6s ease-in-out infinite;
+    }
+  }
+}
+
+@keyframes startup-shine {
+  from { background-position: 100% center; }
+  80%, to { background-position: 0% center; }
+}

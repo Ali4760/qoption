@@ -12,7 +12,7 @@ npm ci --prefix functions
 npm run emulators
 ```
 
-In a second terminal run `npm run seed`. Open the [user workspace](http://127.0.0.1:5000/) or [admin panel](http://127.0.0.1:5000/admin/) and select **Open practice workspace**. The seed command only connects to localhost and is safe to run again. Start emulators before seeding. The [Emulator UI](http://127.0.0.1:4000/) shows the local Auth and Firestore state.
+In a second terminal run `npm run seed`. Open the [user sign-in page](http://127.0.0.1:5000/login.html) or [admin panel](http://127.0.0.1:5000/admin/) and select **Open trading workspace**. The seed command only connects to localhost and is safe to run again. Start emulators before seeding. The [Emulator UI](http://127.0.0.1:4000/) shows the local Auth and Firestore state.
 
 Run `npm run check` for both TypeScript projects. With the emulators running and seeded, run `npm run test:integration` to exercise permissions, settlement, funding, messaging, and pagination.
 

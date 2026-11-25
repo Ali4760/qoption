@@ -56,7 +56,6 @@ p { line-height: 1.5; }
 .quiet { color: var(--quiet); }
 .pos { color: var(--green); }
 .neg { color: var(--red); }
-.boot { padding: 2rem; color: var(--muted); }
 .brand { color: #fff; display: flex; align-items: center; gap: 11px; font-size: 1.22rem; }
 .brand-wordmark { font-family: "Syne", "Arial Black", system-ui, sans-serif; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
 .brand-logo { display: block; flex: none; width: 40px; height: 40px; object-fit: contain; }
