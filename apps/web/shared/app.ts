@@ -1,10 +1,12 @@
 import './style.css';
+import './login.css';
 import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail,
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, findAsset, profitPercent, type Asset } from '../../../functions/src/market';
-import { connect, emulator } from './firebase';
-import { adminNav, brand, chartFrames, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, walletForms } from './screens';
-import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
+import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
+import { userLogin } from './login';
+import { adminNav, brand, brandMark, chartFrames, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, walletForms } from './screens';
+import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 
 const root = document.querySelector<HTMLElement>('#app')!;
 const admin = root.dataset.audience === 'admin';
@@ -13,10 +15,10 @@ let api: Awaited<ReturnType<typeof connect>>;
 let person: User | null;
 let home: Home | undefined;
 let roles: string[] = [];
-let access = false, version = 0, authVersion = 0, clockOffset = 0;
+let access = false, guestMarket = false, version = 0, authVersion = 0, clockOffset = 0;
 let route = first, selected: Asset = assets[0], frame = '1m';
 let chart: ReturnType<typeof import('./canvas-chart').mountChart> | undefined;
-let refreshTimer = 0, toastTimer = 0, refreshing = false, registration = false;
+let refreshTimer = 0, toastTimer = 0, refreshing = false, registration = !admin && new URLSearchParams(location.search).get('mode') === 'register';
 let resolver: MultiFactorResolver | undefined;
 let secret: TotpSecret | undefined;
 let clientSection = 'activity';
@@ -77,20 +79,51 @@ function definition(entries: [string, unknown][]) {
   return '<dl>' + entries.map(([name, value]) => '<dt>' + esc(name) + '</dt><dd>' + esc(value ?? '—') + '</dd>').join('') + '</dl>';
 }
 function showAuth(notice = '') {
-  const heading = admin ? 'Admin sign-in' : registration ? 'Create your demo account' : 'Sign in';
+  guestMarket = false;
+  stop();
+  if (!admin) {
+    root.innerHTML = userLogin({ registration, signedIn: !!person, remember: rememberPreference(), showQuickStart: emulator, notice }) + dialogShell;
+    void attachPublicChart('#login-chart', '#login-chart-status', false);
+    return;
+  }
+  const heading = admin ? 'Admin sign-in' : registration ? 'Create your practice account' : 'Sign in';
   const fields = '<label>Email<input name="email" type="email" autocomplete="email" required></label>' +
     '<label>Password<input name="password" type="password" autocomplete="' + (registration ? 'new-password' : 'current-password') + '" minlength="6" required></label>';
-  root.innerHTML = '<div class="auth-wrap"><div class="auth-intro">' + brand + '<h1>' + (admin ? 'Trading operations' : 'Your paper-trading workspace') +
-    '</h1><p>' + (admin ? 'Review demo accounts, approve funding requests and monitor trading activity.' : 'Explore crypto markets, practise trades and follow each result in one workspace.') +
-    '</p><span class="pill demo">Demo environment</span></div><section class="auth-card"><h2>' + heading + '</h2>' +
+  root.innerHTML = '<div class="auth-wrap"><div class="auth-intro">' + brand + '<h1>' + (admin ? 'Trading operations' : 'Your practice trading workspace') +
+    '</h1><p>' + (admin ? 'Review practice accounts, approve funding requests and monitor trading activity.' : 'Explore crypto markets, practise trades and follow each result in one workspace.') +
+    '</p><span class="pill practice">Practice environment</span></div><section class="auth-card"><h2>' + heading + '</h2>' +
     (notice ? '<p class="error">' + esc(notice) + '</p>' : '') + (!person ? '<form data-form="auth">' + fields +
       '<button class="button">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>' : '') + '<div class="button-row">' +
     (!person && !admin ? '<button class="button secondary compact" data-action="registration">' + (registration ? 'Back to sign in' : 'Create an account') + '</button>' : '') +
     (!person ? '<button class="button secondary compact" data-action="reset">Reset password</button>' : '') +
     (person && admin && !emulator ? '<button class="button secondary compact" data-action="enroll">Set up authenticator</button>' : '') +
     (person ? '<button class="button secondary compact" data-action="signout">Sign out</button>' : '') +
-    (emulator && !person ? '<button class="button secondary" data-action="demo">Open demo workspace</button>' : '') +
+    (emulator && !person ? '<button class="button secondary" data-action="quick-start">Open practice workspace</button>' : '') +
     '<a href="' + (admin ? '/' : '/admin/') + '">' + (admin ? 'User site' : 'Staff sign-in') + '</a></div><p id="auth-notice" class="form-status" role="status"></p>' + dialogShell + '</section></div>';
+}
+async function attachPublicChart(canvasSelector: string, statusSelector: string, live: boolean) {
+  const canvas = root.querySelector<HTMLCanvasElement>(canvasSelector);
+  const status = root.querySelector<HTMLElement>(statusSelector);
+  if (!canvas || !status) return;
+  try {
+    const { mountChart, formatPrice } = await import('./canvas-chart');
+    if (!canvas.isConnected) return;
+    const price = live ? root.querySelector<HTMLElement>('#market-price') : null;
+    chart = mountChart(canvas, status, value => { if (price) price.textContent = formatPrice(value); });
+    chart.load(live ? selected : assets[0], live ? frame : '5m', live);
+    if (!live) status.textContent = 'Simulated chart';
+  } catch {
+    if (status.isConnected) status.textContent = 'Chart unavailable';
+  }
+}
+function showGuestMarket() {
+  if (admin || access || person) return;
+  stop();
+  guestMarket = true;
+  root.innerHTML = '<header class="guest-toolbar">' + brand +
+    '<button type="button" class="button secondary" data-action="back-to-login">Back to sign in</button></header>' +
+    '<main class="content">' + marketScreen(selected, frame) + '</main>' + dialogShell;
+  void attachPublicChart('#market-chart', '#feed-status', true);
 }
 function authNotice(message: string) {
   const node = root.querySelector('#auth-notice');
@@ -102,9 +135,10 @@ function shell() {
     nav().map(([id, icon, name]) => '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span>' + name + '</a>').join('') +
     '</nav><div class="side-bottom"><p class="quiet">' + esc(admin ? 'Staff workspace' : home?.profile.name) + '</p><a href="' + (admin ? '/' : '/admin/') + '">' +
     (admin ? 'User site' : 'Staff sign-in') + '</a></div></aside><div class="work"><header class="topbar">' +
-    '<button class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button><span class="top-title">' +
+    '<button class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
+    '<span class="mobile-brand" role="img" aria-label="Qoption">' + brandMark + '</span><span class="top-title">' +
     (admin ? 'Admin panel' : 'Trading terminal') + '</span><div class="top-actions">' +
-    (admin ? '<span class="pill demo">Demo environment</span>' : '<a href="#wallet" class="top-balance"><span class="quiet">Demo Credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
+    (admin ? '<span class="pill practice">Practice environment</span>' : '<a href="#wallet" class="top-balance"><span class="quiet">Practice Credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
     '<button class="button secondary compact" data-action="signout">Sign out</button></div></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
 }
 async function start() {
@@ -112,7 +146,7 @@ async function start() {
     api = await connect(admin ? 'admin' : 'user');
     onAuthStateChanged(api.auth, async user => {
       const latest = ++authVersion;
-      version++; stop(); access = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
+      version++; stop(); access = false; guestMarket = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
       person = user; resolver = undefined; secret = undefined;
       if (!user) { showAuth(); return; }
       root.innerHTML = '<p class="boot">Opening workspace…</p>';
@@ -133,17 +167,17 @@ async function start() {
 }
 async function renderUser(run: number) {
   if (!home) return '';
-  if (route === 'trade' || route === 'assets') return marketScreen(selected, frame, home, route === 'trade');
+  if (route === 'trade' || route === 'assets') return marketScreen(selected, frame, route === 'trade' ? home : undefined);
   if (route === 'wallet') {
     const [updated, rows] = await Promise.all([api.call<Home>('home'), getPage(run, 'list', { list: 'funding' })]);
     if (run !== version) return '';
     setHome(updated);
-    return title('Wallet', 'Manage demo credits and mock funding requests.', 'Demo Credits') +
+    return title('Wallet', 'Manage practice credits and simulated funding requests.', 'Practice Credits') +
       walletForms(updated.wallet, updated.profile.withdrawalEnabled) + '<div class="dashboard-lower">' + section('Funding history', fundingRows(rows) + navigation()) + '</div>';
   }
   if (route === 'history') {
     const rows = await getPage(run, 'list', { list: 'trades' });
-    return title('Trade history', 'Review open and settled paper trades.') + section('Trades', tradeRows(rows) + navigation());
+    return title('Trade history', 'Review open and settled simulated trades.') + section('Trades', tradeRows(rows) + navigation());
   }
   if (route === 'notifications') {
     const rows = await getPage(run, 'list', { list: 'ledger' });
@@ -157,10 +191,10 @@ async function renderUser(run: number) {
   }
   if (route === 'messages') {
     const rows = await getPage(run, 'list', { list: 'messages' });
-    return title('Messages', 'Contact support about your demo workspace.') + section('Support conversation', messages(rows) + navigation());
+    return title('Messages', 'Contact support about your practice workspace.') + section('Support conversation', messages(rows) + navigation());
   }
-  if (route === 'leaderboard') return title('Leaderboard', 'Example paper-trading standings.', 'Sample rankings') +
-    section('Demo standings', table(['Rank', 'Trader', 'Demo P/L', 'Trades'], [
+  if (route === 'leaderboard') return title('Leaderboard', 'Example practice trading standings.', 'Sample rankings') +
+    section('Practice standings', table(['Rank', 'Trader', 'Practice P/L', 'Trades'], [
       ['1', 'MarketLark', '242.00', '17'], ['2', 'BlueCandle', '188.00', '14'], ['3', 'HarborQuant', '146.00', '12'],
       ['4', 'RiverDelta', '112.00', '11'], ['5', 'NightSession', '84.00', '9'],
     ], 'No rankings'));
@@ -189,13 +223,13 @@ async function renderAdmin(run: number) {
     const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[] }>('admin.dashboard');
     if (run === version) visibleRows = new Map([...values.recent, ...values.pending].map(row => [row.id, row]));
     const cards = [['clients', 'Assigned clients'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
-    return title('Admin dashboard', 'Monitor clients, paper trades and mock funding requests.', 'Staff workspace') + '<div class="metrics">' +
+    return title('Admin dashboard', 'Monitor client accounts, trades, and funding requests.', 'Staff workspace') + '<div class="metrics">' +
       cards.map(([key, name]) => '<article class="metric"><small>' + name + '</small><strong>' + Number(values[key] || 0).toLocaleString() + '</strong>' +
         (nav().some(item => item[0] === key) ? '<a href="#' + key + '">View ' + key + '</a>' : '') + '</article>').join('') + '</div>' +
       section('Operations', '<div class="panel-body button-row">' + nav().filter(item => item[0] !== 'overview').map(([id,, name]) =>
         '<a class="button secondary" href="#' + id + '">' + name + '</a>').join('') + '</div>') + '<div class="overview-panels dashboard-lower">' +
       (role('finance') ? section('Pending funding', table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
-        esc(label(row.kind)), credits(row.amount), esc(row.uid), actionButton('review-funding', row.id, 'Review'),
+        esc(label(row.kind)), credits(row.amount), esc(recordReference(row.uid)), actionButton('review-funding', row.id, 'Review'),
       ]), 'No requests awaiting review')) : '') +
       (role('admin') ? section('Recent trades', table(['Market', 'Direction', 'Status', ''], values.recent.map(row => [
         pair(row.symbol), state(row.direction), state(row.outcome || row.status), actionButton('trade-detail', row.id, 'Details'),
@@ -222,12 +256,12 @@ async function renderAdmin(run: number) {
   }
   if (route === 'trades') {
     const rows = await getPage(run, 'admin.trades');
-    return title('Live trades', 'Review recent activity from the paper-trading engine.') +
-      section('Trade activity', '<div class="filters">' + refresh + '</div>' + tradeRows(rows, true) + navigation());
+    return title('Trade activity', 'Review recent activity from the simulated order engine.') +
+      section('Recent trades', '<div class="filters">' + refresh + '</div>' + tradeRows(rows, true) + navigation());
   }
   const rows = await getPage(run, 'admin.audit');
   return title('Audit log', 'Staff actions recorded by the server.') + section('Audit events', table(['Event', 'Client ID', 'Staff ID', 'Reason', 'Date'],
-    rows.map(row => [esc(row.event), esc(row.uid), esc(row.actor), esc(row.reason), dateTime(row.createdAt)]), 'No audit events') + navigation());
+    rows.map(row => [esc(row.event), esc(recordReference(row.uid)), esc(recordReference(row.actor)), esc(row.reason), dateTime(row.createdAt)]), 'No audit events') + navigation());
 }
 
 async function render() {
@@ -298,18 +332,18 @@ function updateMarket() {
   const selector = root.querySelector<HTMLSelectElement>('#asset-select'); if (selector) selector.value = selected.symbol;
   for (const button of root.querySelectorAll<HTMLElement>('[data-action="asset"], [data-action="frame"]')) button.setAttribute('aria-pressed',
     String(button.dataset.id === (button.dataset.action === 'asset' ? selected.symbol : frame)));
-  chart?.load(selected, frame, route === 'assets', clockOffset);
+  chart?.load(selected, frame, guestMarket || route === 'assets', clockOffset);
 }
 
 function details(action: string, row: Row) {
   if (action === 'trade-detail') {
-    dialog('Trade details', definition([['Reference', row.id], ['Asset', String(row.symbol).replace('USDT', '/USDT')],
+    dialog('Trade details', definition([['Reference', recordReference(row.id)], ['Asset', String(row.symbol).replace('USDT', '/USDT')],
       ['Direction', label(row.direction)], ['Stake', credits(row.stake)], ['Entry price', row.entry], ['Expiry', dateTime(row.dueAt)],
-      ['Exit price', row.exit], ['Result', label(row.outcome || row.status)], ['Net result', row.pnl === undefined ? '—' : credits(row.pnl) + ' Credits']]));
+      ['Exit price', row.exit], ['Result', label(row.outcome || row.status)], ['Net result', row.pnl === undefined ? '—' : credits(row.pnl) + ' Practice Credits']]));
     return;
   }
   const id = esc(row.id);
-  const info = definition([['Reference', row.id], ['Type', label(row.kind)], ['Amount', credits(row.amount) + ' Credits'],
+  const info = definition([['Reference', recordReference(row.id)], ['Type', label(row.kind)], ['Amount', credits(row.amount) + ' Practice Credits'],
     ['Status', label(row.status)], ['Submitted', dateTime(row.createdAt)], ['Decision reason', row.reason]]);
   if (action === 'review-funding') {
     dialog('Review ' + label(row.kind).toLowerCase(), info + '<form class="stack" data-form="admin.funding.decide"><input type="hidden" name="id" value="' + id +
@@ -324,7 +358,7 @@ function clientAction(action: string, id: string) {
   const target = visibleRows.get('@client');
   if (!target || target.id !== id) return;
   const restrict = action === 'restrictions';
-  dialog(restrict ? 'Client restrictions' : 'Adjust demo balance',
+  dialog(restrict ? 'Client restrictions' : 'Adjust practice balance',
     '<form class="stack" data-form="' + (restrict ? 'admin.client.restrict' : 'admin.client.adjust') + '"><input type="hidden" name="uid" value="' + esc(id) + '">' +
     (restrict ? '<label class="check-row"><input type="checkbox" name="tradeEnabled" ' + (target.tradeEnabled ? 'checked' : '') +
       '>Allow new trades</label><label class="check-row"><input type="checkbox" name="withdrawalEnabled" ' + (target.withdrawalEnabled ? 'checked' : '') +
@@ -360,8 +394,24 @@ root.addEventListener('click', async event => {
       case 'menu': { const open = side?.classList.toggle('open'); target.setAttribute('aria-expanded', String(open)); if (open) side?.querySelector<HTMLElement>('a')?.focus(); break; }
       case 'signout': await signOut(api.auth); break;
       case 'registration': registration = !registration; showAuth(); break;
-      case 'demo': await signInWithEmailAndPassword(api.auth, admin ? 'staff@example.test' : 'trader@example.test', 'QoptionDemo!2026'); break;
-      case 'reset': dialog('Reset password', '<form class="stack" data-form="reset"><label>Email address<input type="email" name="email" required></label><button class="button">Send reset link</button>' + formStatus() + '</form>'); break;
+      case 'guest-market': showGuestMarket(); break;
+      case 'back-to-login': registration = false; showAuth(); break;
+      case 'password-visibility': {
+        const password = root.querySelector<HTMLInputElement>('#login-password');
+        if (!password) break;
+        const reveal = password.type === 'password';
+        password.type = reveal ? 'text' : 'password';
+        target.textContent = reveal ? 'Hide' : 'Show';
+        target.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+        break;
+      }
+      case 'quick-start': await signInWithEmailAndPassword(api.auth, admin ? 'staff@example.test' : 'trader@example.test', 'QoptionDemo!2026'); break;
+      case 'reset': {
+        const email = root.querySelector<HTMLInputElement>('form[data-form=auth] input[name=email]')?.value;
+        dialog('Reset password', '<form class="stack" data-form="reset"><label>Email address<input type="email" name="email" value="' +
+          esc(email) + '" required></label><button class="button">Send reset link</button>' + formStatus() + '</form>');
+        break;
+      }
       case 'enroll': await enroll(); break;
       case 'close': panel().close(); break;
       case 'reload': await render(); break;
@@ -375,7 +425,7 @@ root.addEventListener('click', async event => {
       case 'trade-detail': case 'funding-detail': case 'review-funding': { const row = visibleRows.get(id); if (row) details(action, row); break; }
     }
   } catch (error) {
-    if (action === 'demo') authNotice('Start the emulators and run npm run seed to open this demo.');
+    if (action === 'quick-start') authNotice('Start the emulators and run npm run seed to open the practice workspace.');
     else if (access) toast(errorMessage(error));
     else authNotice(errorMessage(error));
   }
@@ -391,14 +441,15 @@ root.addEventListener('input', event => {
 });
 function confirmTrade(values: Record<string, FormDataEntryValue>, direction: string) {
   const stake = cents(values.amount), expiry = Number(values.duration);
-  dialog('Confirm paper trade', definition([['Asset', selected.code + '/USDT'], ['Direction', label(direction)], ['Stake', credits(stake) + ' Credits'],
-    ['Expiry', expiry + ' seconds'], ['Profit on a win', credits(Math.round(stake * profitPercent / 100)) + ' Credits']]) +
+  dialog('Confirm simulated trade', definition([['Asset', selected.code + '/USDT'], ['Direction', label(direction)], ['Stake', credits(stake) + ' Practice Credits'],
+    ['Expiry', expiry + ' seconds'], ['Profit on a win', credits(Math.round(stake * profitPercent / 100)) + ' Practice Credits']]) +
     '<form class="stack" data-form="trade.place"><input type="hidden" name="symbol" value="' + selected.symbol + '"><input type="hidden" name="duration" value="' + expiry +
     '"><input type="hidden" name="amount" value="' + esc(values.amount) + '"><input type="hidden" name="direction" value="' + esc(direction) +
-    '"><button class="button">Place demo trade</button>' + formStatus() + '</form>');
+    '"><button class="button">Place simulated trade</button>' + formStatus() + '</form>');
 }
 async function signIn(values: Record<string, FormDataEntryValue>) {
   const email = String(values.email), password = String(values.password);
+  if (!admin) await setRememberPreference(api.auth, values.remember === 'on');
   if (registration && !admin) { await createUserWithEmailAndPassword(api.auth, email, password); return; }
   try { await signInWithEmailAndPassword(api.auth, email, password); }
   catch (error) {
@@ -412,7 +463,10 @@ async function signIn(values: Record<string, FormDataEntryValue>) {
 async function accountForm(op: string, values: Record<string, FormDataEntryValue>, form: HTMLFormElement) {
   if (op === 'auth') { await signIn(values); showFormStatus(form, ''); return true; }
   if (op === 'reset') {
-    await sendPasswordResetEmail(api.auth, String(values.email));
+    try { await sendPasswordResetEmail(api.auth, String(values.email)); }
+    catch (error) {
+      if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
+    }
     showFormStatus(form, 'If an account exists for this address, a reset link was sent.');
     return true;
   }
@@ -454,11 +508,16 @@ root.addEventListener('submit', async event => {
     if (started !== version) return;
     if (op === 'admin.funding.decide' && route !== 'overview') resetList();
     await render();
-    toast(op === 'trade.place' ? 'Paper trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
+    toast(op === 'trade.place' ? 'Simulated trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
   } catch (error) { showFormStatus(form, errorMessage(error)); }
   finally { delete form.dataset.busy; buttons.forEach(button => { button.disabled = false; }); }
 });
 window.addEventListener('hashchange', () => void render());
 window.addEventListener('pagehide', stop);
-window.addEventListener('pageshow', event => { if (event.persisted && access) void render(); });
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  if (access) void render();
+  else if (guestMarket) void attachPublicChart('#market-chart', '#feed-status', true);
+  else if (!admin) void attachPublicChart('#login-chart', '#login-chart-status', false);
+});
 void start();

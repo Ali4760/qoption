@@ -14,7 +14,7 @@ const password = 'QoptionDemo!2026';
 const now = Date.now();
 const accounts = [
   { uid: 'demo-user', name: 'Alex Morgan', email: 'trader@example.test' },
-  { uid: 'demo-staff', name: 'Operations Demo', email: 'staff@example.test' },
+  { uid: 'demo-staff', name: 'Practice Operations', email: 'staff@example.test' },
   { uid: 'demo-jordan', name: 'Jordan Lee', email: 'jordan@example.test' },
   { uid: 'demo-sam', name: 'Sam Rivera', email: 'sam@example.test' },
 ];
@@ -34,16 +34,16 @@ async function seed() {
       const held = person.uid === 'demo-jordan' ? 7500 : 0;
       tx.set(db.collection('profiles').doc(person.uid), { ...person, nameSearch: person.name.toLowerCase(), assignedTo: 'demo-staff', tradeEnabled: true, withdrawalEnabled: true, createdAt: now - 86400000 });
       tx.set(db.collection('wallets').doc(person.uid), { available: 100000 - held, held });
-      tx.set(db.collection('ledger').doc('opening_' + person.uid), { uid: person.uid, kind: 'Opening balance', availableDelta: 100000, heldDelta: 0, note: 'Paper-trading credit', createdAt: now - 86400000 });
+      tx.set(db.collection('ledger').doc('opening_' + person.uid), { uid: person.uid, kind: 'Opening balance', availableDelta: 100000, heldDelta: 0, note: 'Practice trading credit', createdAt: now - 86400000 });
     }
     tx.set(db.collection('staff').doc('demo-staff'), { active: true, allClients: true, roles: ['admin', 'finance', 'support'] });
-    tx.set(db.collection('funding').doc('demo-deposit'), { uid: 'demo-sam', kind: 'deposit', amount: 25000, method: 'Demo transfer', status: 'pending', createdAt: now - 440000 });
-    tx.set(db.collection('funding').doc('demo-withdrawal'), { uid: 'demo-jordan', kind: 'withdrawal', amount: 7500, method: 'Demo transfer', status: 'pending', createdAt: now - 340000 });
-    tx.set(db.collection('ledger').doc('demo-withdrawal-hold'), { uid: 'demo-jordan', kind: 'Withdrawal hold', availableDelta: -7500, heldDelta: 7500, note: 'Mock withdrawal', createdAt: now - 340000 });
-    tx.set(db.collection('messages').doc('demo-welcome'), { uid: 'demo-user', sender: 'Support', message: 'Welcome to your demo workspace. Contact us here if you need help exploring it.', createdAt: now - 600000 });
+    tx.set(db.collection('funding').doc('demo-deposit'), { uid: 'demo-sam', kind: 'deposit', amount: 25000, method: 'Simulated transfer', status: 'pending', createdAt: now - 440000 });
+    tx.set(db.collection('funding').doc('demo-withdrawal'), { uid: 'demo-jordan', kind: 'withdrawal', amount: 7500, method: 'Simulated transfer', status: 'pending', createdAt: now - 340000 });
+    tx.set(db.collection('ledger').doc('demo-withdrawal-hold'), { uid: 'demo-jordan', kind: 'Withdrawal hold', availableDelta: -7500, heldDelta: 7500, note: 'Simulated withdrawal', createdAt: now - 340000 });
+    tx.set(db.collection('messages').doc('demo-welcome'), { uid: 'demo-user', sender: 'Support', message: 'Welcome to your practice workspace. Contact us here if you need help exploring it.', createdAt: now - 600000 });
     tx.create(marker, { seededAt: now });
   });
-  console.log('Emulator demo accounts ready: trader@example.test and staff@example.test.');
+  console.log('Emulator practice accounts ready: trader@example.test and staff@example.test.');
 }
 seed().catch(error => {
   console.error(error.message);

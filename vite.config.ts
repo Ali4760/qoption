@@ -8,6 +8,6 @@ export default defineConfig({
   build: {
     outDir: resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
-    rollupOptions: { input: [resolve(root, 'index.html'), resolve(root, 'admin/index.html')] },
+    rollupOptions: { input: [resolve(root, 'index.html'), resolve(root, 'home.html'), resolve(root, 'faq.html'), resolve(root, 'admin/index.html')] },
   },
 });

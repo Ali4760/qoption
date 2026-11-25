@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" type="image/png" href="/assets/qoption-logo.png">
+  <meta name="description" content="Follow live crypto markets and trade with virtual funds in Qoption.">
+  <title>Qoption — Live markets and practice trading</title>
+</head>
+<body class="home-page">
+  <a class="home-skip" href="#main">Skip to content</a>
+  <header class="home-header">
+    <div class="home-container home-header-grid">
+      <a class="brand" href="/home.html"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span>Qoption</span></a>
+      <nav class="home-nav" id="home-navigation" aria-label="Main navigation">
+        <a href="/home.html" aria-current="page">Home</a>
+        <a href="/#trade">Trading</a>
+        <a href="#markets">Crypto</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/#messages">Contact</a>
+        <a href="/" class="home-menu-account">Sign in</a>
+        <a href="/?mode=register" class="home-menu-account">Create account</a>
+      </nav>
+      <div class="home-header-actions">
+        <a href="/" class="button secondary compact home-login">Sign in</a>
+        <a href="/?mode=register" class="button home-primary compact">Create account</a>
+        <button type="button" class="button secondary compact home-menu-toggle" aria-controls="home-navigation" aria-expanded="false" aria-label="Open menu"><span aria-hidden="true"></span></button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="home-hero" aria-labelledby="hero-heading">
+      <div class="home-container">
+        <div class="home-hero-copy">
+          <h1 id="hero-heading">Follow live prices.<br><span>Trade with virtual funds.</span></h1>
+          <p>Watch crypto markets, place a simulated trade, and see the result in your wallet and trade history.</p>
+          <div class="home-hero-actions">
+            <a class="button home-primary" href="/?mode=register">Open an account</a>
+            <a class="button secondary" href="#markets">Explore markets</a>
+          </div>
+        </div>
+
+        <div class="home-terminal" id="markets">
+          <section class="home-chart-panel" aria-labelledby="home-market-title">
+            <header class="home-chart-top">
+              <div>
+                <p class="home-market-name" id="home-market-name">Bitcoin</p>
+                <h2 id="home-market-title">BTC/USDT</h2>
+              </div>
+              <div class="home-price">
+                <strong id="home-live-price">—</strong>
+                <span>USDT</span>
+              </div>
+            </header>
+            <div class="home-chart-controls">
+              <div class="home-toggle" role="group" aria-label="Chart interval">
+                <button type="button" data-interval="5m" aria-pressed="true">5m</button>
+                <button type="button" data-interval="15m" aria-pressed="false">15m</button>
+                <button type="button" data-interval="1h" aria-pressed="false">1h</button>
+                <button type="button" data-interval="4h" aria-pressed="false">4h</button>
+                <button type="button" data-interval="1d" aria-pressed="false">1d</button>
+              </div>
+              <div class="home-toggle" role="group" aria-label="Chart type">
+                <button type="button" data-chart-mode="combined" aria-pressed="true">Candles + line</button>
+                <button type="button" data-chart-mode="candles" aria-pressed="false">Candles</button>
+                <button type="button" data-chart-mode="line" aria-pressed="false">Line</button>
+              </div>
+            </div>
+            <canvas class="chart home-chart" id="home-market-chart" aria-label="Bitcoin spot candlesticks, closing price line, and volume"></canvas>
+            <div class="home-chart-status"><span id="home-feed-status" role="status">Connecting to Binance…</span><span>Read-only market data</span></div>
+            <dl class="home-statistics" aria-label="Rolling 24-hour statistics">
+              <div><dt>24h open</dt><dd id="home-open">—</dd></div>
+              <div><dt>24h high</dt><dd id="home-high">—</dd></div>
+              <div><dt>24h change</dt><dd id="home-change">—</dd></div>
+            </dl>
+          </section>
+
+          <aside class="home-watchlist" aria-labelledby="watchlist-title">
+            <div class="home-watchlist-header">
+              <h2 id="watchlist-title">Crypto watchlist</h2>
+              <p>Select a market to update the chart.</p>
+            </div>
+            <div id="home-market-list" class="home-market-list" role="group" aria-label="Select crypto market"></div>
+            <p class="home-watchlist-status" id="home-quote-status" role="status">Loading Binance quotes…</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <div class="home-container">
+      <section class="home-reference" aria-labelledby="reference-heading">
+        <div>
+          <h2 id="reference-heading">Forex and gold references</h2>
+          <p>Illustrative figures from the reference homepage.</p>
+        </div>
+        <dl>
+          <div><dt>EUR/USD</dt><dd>1.0842 <span>−0.18%</span></dd></div>
+          <div><dt>XAU/USD</dt><dd>2,356.80 <span>+0.64%</span></dd></div>
+        </dl>
+      </section>
+
+      <section class="home-section" id="how-it-works" aria-labelledby="workflow-heading">
+        <h2 id="workflow-heading">From chart to trade history</h2>
+        <p>One workspace for watching prices and practising decisions.</p>
+        <ol class="home-workflow">
+          <li>
+            <h3>Choose a market</h3>
+            <p>Switch between the supported crypto pairs. Compare each candle’s price range with the closing-price line and trading volume.</p>
+          </li>
+          <li>
+            <h3>Set up a trade</h3>
+            <p>Pick an amount, direction, and expiry. Review your order before confirming it with practice credits.</p>
+          </li>
+          <li>
+            <h3>Instant confirmation</h3>
+            <p>Check the amount, duration, and potential return before confirming your order.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="home-section home-faq" id="faq" aria-labelledby="faq-heading">
+        <div>
+          <h2 id="faq-heading">Common questions</h2>
+          <p>What to expect from the market preview and the practice workspace.</p>
+          <a class="home-faq-link" href="/faq.html">View all questions</a>
+        </div>
+        <div class="home-faq-list">
+          <details><summary>Are the prices on this page live?</summary><p>The crypto chart streams Binance spot prices. The watchlist and statistics refresh periodically. The forex and gold figures are illustrative.</p></details>
+          <details><summary>How do trades settle?</summary><p>At expiry, the workspace compares the entry price with the closing price from the practice feed, then updates your Practice Credits.</p></details>
+          <details><summary>Do I need an account to see the charts?</summary><p>The public chart and watchlist are available here. Sign in to use your practice wallet, trade history, and support messages.</p></details>
+        </div>
+      </section>
+
+      <section class="home-invite" aria-labelledby="invite-heading">
+        <div><h2 id="invite-heading">Try the workspace</h2><p>Set up a trade and see how it settles.</p></div>
+        <a class="button home-primary" href="/?mode=register">Create account</a>
+      </section>
+    </div>
+  </main>
+  <footer class="home-footer">
+    <div class="home-container">
+      <div class="home-footer-grid">
+        <div class="home-footer-brand">
+          <a class="brand" href="/home.html"><img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt=""><span>Qoption</span></a>
+          <p>Live crypto charts and a workspace for trading with virtual funds.</p>
+        </div>
+        <nav class="home-footer-group" aria-labelledby="footer-platform">
+          <h2 id="footer-platform">Platform</h2>
+          <a href="/home.html">Home</a>
+          <a href="/#trade">Trading</a>
+          <a href="#markets">Crypto markets</a>
+        </nav>
+        <nav class="home-footer-group" aria-labelledby="footer-resources">
+          <h2 id="footer-resources">Resources</h2>
+          <a href="#how-it-works">How it works</a>
+          <a href="/faq.html">FAQ</a>
+        </nav>
+        <nav class="home-footer-group" aria-labelledby="footer-support">
+          <h2 id="footer-support">Support</h2>
+          <a href="/#messages">Contact support</a>
+        </nav>
+      </div>
+      <div class="home-footer-bottom">
+        <small>© <span id="home-footer-year">2026</span> Qoption</small>
+        <nav aria-label="Account links">
+          <a href="/">Sign in</a>
+          <a href="/?mode=register">Create account</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+  <script type="module" src="/shared/home.ts"></script>
+</body>
+</html>

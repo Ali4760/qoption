@@ -38,7 +38,7 @@ function identifier(value: unknown): string {
 }
 function cents(value: unknown, signed = false): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > maxAmount || (signed ? value === 0 : value < 100)) {
-    fail('invalid-argument', 'Enter an amount within the demo limits.');
+    fail('invalid-argument', 'Enter an amount within the practice limits.');
   }
   return value;
 }
@@ -56,7 +56,7 @@ function audit(tx: Transaction, actor: Actor, target: string, event: string, rea
   tx.create(db.collection('audit').doc(), { uid: target, actor: actor.uid, event, reason, createdAt: now });
 }
 function changeFunds(tx: Transaction, uid: string, current: DocumentData | undefined, availableDelta: number, heldDelta: number) {
-  if (!current) fail('failed-precondition', 'Open the workspace before changing the demo wallet.');
+  if (!current) fail('failed-precondition', 'Open the workspace before changing the practice wallet.');
   const available = current.available + availableDelta;
   const held = current.held + heldDelta;
   if (!Number.isSafeInteger(available) || !Number.isSafeInteger(held) || available < 0 || held < 0) {
@@ -74,7 +74,7 @@ async function upsertProfile(uid: string, email: string) {
     }
     if (!balance.exists) {
       tx.create(wallet(uid), { available: openingAmount, held: 0 });
-      ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Paper-trading credit');
+      ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Practice trading credit');
     }
   });
 }
@@ -145,7 +145,7 @@ async function placeTrade(user: Actor, data: Data) {
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
     changeFunds(tx, user.uid, balance.data(), -stake, stake);
     tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion: 1, profitPercent });
-    ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' paper trade');
+    ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' simulated trade');
     return { id: trade.id, entry, dueAt };
   });
 }
@@ -163,7 +163,7 @@ async function settle(id: string, now: number) {
     const payout = outcome === 'win' ? trade.stake + Math.round(trade.stake * trade.profitPercent / 100) : outcome === 'refund' ? trade.stake : 0;
     changeFunds(tx, trade.uid, balance, payout, -trade.stake);
     tx.update(ref, { status: 'settled', outcome, exit, payout, pnl: payout - trade.stake, settledAt: now });
-    ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' paper trade');
+    ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' simulated trade');
   });
 }
 async function settleDue(uid?: string) {
@@ -186,9 +186,9 @@ async function askFunding(user: Actor, data: Data) {
     if (kind === 'withdrawal') {
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
       changeFunds(tx, user.uid, balance.data(), -amount, amount);
-      ledger(tx, user.uid, 'funding_hold_' + ref.id, 'Withdrawal hold', -amount, amount, now, 'Mock withdrawal');
+      ledger(tx, user.uid, 'funding_hold_' + ref.id, 'Withdrawal hold', -amount, amount, now, 'Simulated withdrawal');
     }
-    tx.create(ref, { uid: user.uid, kind, amount, createdAt: now, status: 'pending', method: 'Demo transfer' });
+    tx.create(ref, { uid: user.uid, kind, amount, createdAt: now, status: 'pending', method: 'Simulated transfer' });
     return { id: ref.id };
   });
 }
@@ -214,7 +214,7 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
     const availableDelta = (request.kind === 'deposit' && state === 'approved') || (request.kind === 'withdrawal' && state !== 'approved') ? request.amount : 0;
     changeFunds(tx, request.uid, balance, availableDelta, heldDelta);
     tx.update(ref, { status: state, reason, decidedAt: now });
-    ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, 'Demo transfer');
+    ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, 'Simulated transfer');
     if (asStaff) audit(tx, user, request.uid, request.kind + ' ' + state, reason, now);
     return { id, status: state };
   });

@@ -1,9 +1,22 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { browserSessionPersistence, connectAuthEmulator, getAuth, setPersistence } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, setPersistence, type Auth } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 
 export const emulator = import.meta.env.DEV || import.meta.env.MODE === 'emulator';
+
+const rememberKey = 'qoption-remember-user';
+
+export function rememberPreference() {
+  try { return localStorage.getItem(rememberKey) === 'true'; }
+  catch { return false; }
+}
+
+export async function setRememberPreference(auth: Auth, remember: boolean) {
+  await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+  try { localStorage.setItem(rememberKey, String(remember)); }
+  catch { /* Firebase still applies the choice for this session. */ }
+}
 
 async function configuration(): Promise<FirebaseOptions> {
   if (emulator) return { apiKey: 'qoption-emulator', projectId: 'demo-qoption', appId: '1:1234567890:web:demo' };
@@ -35,7 +48,7 @@ export async function connect(audience: string) {
     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   }
-  await setPersistence(auth, browserSessionPersistence);
+  await setPersistence(auth, audience === 'user' && rememberPreference() ? browserLocalPersistence : browserSessionPersistence);
   const call = httpsCallable<Record<string, unknown>, unknown>(functions, 'workspace');
 
   return {
