@@ -5,7 +5,7 @@ import { FieldPath, getFirestore, type DocumentData, type Query, type Transactio
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { demoPrice, durations, findAsset, profitPercent } from './market';
+import { demoPrice, durations, findAsset, profitForDuration, profitPercent } from './market';
 
 initializeApp();
 const db = getFirestore();
@@ -13,7 +13,7 @@ const local = process.env.FUNCTIONS_EMULATOR === 'true';
 const requireAppCheck = defineBoolean('REQUIRE_APP_CHECK', { default: true });
 const region = defineString('QOPTION_REGION', { default: 'us-central1' });
 const openingAmount = 100000;
-const maxAmount = 10000000;
+const maxAmount = 100000000;
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 type Data = Record<string, unknown>;
 type Actor = { uid: string; staff: string[]; allClients: boolean };
@@ -170,6 +170,22 @@ async function mutate(user: Actor, data: Data, operation: string, parameters: un
   });
 }
 
+async function liveAssetPrice(symbol: string): Promise<number | null> {
+  if (local) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const resp = await fetch('https://data-api.binance.vision/api/v3/ticker/price?symbol=' + encodeURIComponent(symbol), { signal: controller.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as { price?: string };
+    const price = Number(json?.price);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
 async function placeTrade(user: Actor, data: Data) {
   const asset = findAsset(data.symbol);
   const duration = Number(data.duration);
@@ -179,16 +195,19 @@ async function placeTrade(user: Actor, data: Data) {
   }
   const stake = cents(data.amount);
   const now = Date.now(), dueAt = now + 1000 * duration;
-  const entry = demoPrice(asset, now);
+  const pct = profitForDuration(duration);
+  const clientPrice = typeof data.price === 'number' && Number.isFinite(data.price) && data.price > 0 ? data.price : 0;
+  const feedVersion = clientPrice > 0 ? 2 : 1;
+  const entry = clientPrice > 0 ? Math.round(clientPrice * 1e6) / 1e6 : demoPrice(asset, now);
   const trade = db.collection('trades').doc();
   const result = await mutate(user, data, 'trade.place', [asset.symbol, duration, direction, stake], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
     changeFunds(tx, user.uid, balance.data(), -stake, stake);
-    tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion: 1, profitPercent });
-    ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' simulated trade');
-    return { id: trade.id, entry, dueAt };
+    tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion, profitPercent: pct });
+    ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' trade');
+    return { id: trade.id, entry, dueAt, duration, profitPercent: pct, stake, symbol: asset.symbol, direction, createdAt: now };
   });
   await bumpSync({ tradesAt: Date.now() }, [user.uid]);
   return result;
@@ -196,6 +215,12 @@ async function placeTrade(user: Actor, data: Data) {
 
 async function settle(id: string, now: number): Promise<string | null> {
   const ref = db.collection('trades').doc(id);
+  const preSnap = (await ref.get()).data();
+  if (!preSnap || preSnap.status !== 'open' || preSnap.dueAt > now) return null;
+  let liveExit: number | null = null;
+  if (preSnap.feedVersion === 2 && typeof preSnap.symbol === 'string') {
+    liveExit = await liveAssetPrice(preSnap.symbol);
+  }
   let settledUid: string | null = null;
   await db.runTransaction(async tx => {
     const trade = (await tx.get(ref)).data();
@@ -204,15 +229,47 @@ async function settle(id: string, now: number): Promise<string | null> {
     const balance = balanceSnap.data();
     const tradeMode = String(personSnap.get('tradeMode') || 'auto').toLowerCase();
     const asset = findAsset(trade.symbol);
-    const exit = asset && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
+    let exit: number | null = null;
+    if (trade.feedVersion === 2) {
+      if (liveExit !== null) exit = liveExit;
+      else if (asset) {
+        const simDelta = (demoPrice(asset, trade.dueAt) - demoPrice(asset, trade.createdAt)) / Math.max(1e-9, demoPrice(asset, trade.createdAt));
+        exit = Math.round(Number(trade.entry) * (1 + simDelta) * 1e6) / 1e6;
+      }
+    } else {
+      exit = asset && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
+    }
     const outcome = tradeMode === 'win' ? 'win'
       : tradeMode === 'loss' ? 'loss'
       : exit === null || exit === trade.entry ? 'refund'
       : ((exit > trade.entry) === (trade.direction === 'up') ? 'win' : 'loss');
-    const payout = outcome === 'win' ? trade.stake + Math.round(trade.stake * trade.profitPercent / 100) : outcome === 'refund' ? trade.stake : 0;
+    if (tradeMode === 'win' && (exit === null || ((exit > trade.entry) !== (trade.direction === 'up')))) {
+      const nudge = Math.max(Number(trade.entry) * 0.0004, 0.0001);
+      exit = Math.round((Number(trade.entry) + (trade.direction === 'up' ? nudge : -nudge)) * 1e6) / 1e6;
+    } else if (tradeMode === 'loss' && (exit === null || ((exit > trade.entry) === (trade.direction === 'up')))) {
+      const nudge = Math.max(Number(trade.entry) * 0.0004, 0.0001);
+      exit = Math.round((Number(trade.entry) + (trade.direction === 'up' ? -nudge : nudge)) * 1e6) / 1e6;
+    }
+    const pct = Number(trade.profitPercent || profitPercent);
+    const payout = outcome === 'win' ? trade.stake + Math.round(trade.stake * pct / 100) : outcome === 'refund' ? trade.stake : 0;
+    const pnl = payout - trade.stake;
     changeFunds(tx, trade.uid, balance, payout, -trade.stake);
-    tx.update(ref, { status: 'settled', outcome, exit, payout, pnl: payout - trade.stake, settledAt: now });
-    ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' simulated trade');
+    tx.update(ref, { status: 'settled', outcome, exit, payout, pnl, settledAt: now });
+    ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' trade');
+    const pairLabel = (asset?.code || String(trade.symbol || '').replace(/USDT$/, '')) + '/USD';
+    const amtText = '₹' + (Math.abs(outcome === 'win' ? pnl : trade.stake) / 100).toFixed(2);
+    const notifMsg = outcome === 'win'
+      ? `Trade successful on ${pairLabel}. Profit: ${amtText}.`
+      : outcome === 'loss'
+      ? `Trade closed on ${pairLabel}. Loss: ${amtText}.`
+      : `Trade refunded on ${pairLabel}.`;
+    tx.create(db.collection('notifications').doc('trade_' + id), {
+      uid: trade.uid,
+      title: 'Trade Result',
+      message: notifMsg,
+      type: 'TRADE',
+      createdAt: now,
+    });
     settledUid = String(trade.uid || '');
   });
   return settledUid;
@@ -232,23 +289,65 @@ async function settleDue(uid?: string) {
   }
 }
 
+function cleanBankDetails(raw: unknown): Record<string, string> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const cleaned: Record<string, string> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[a-zA-Z0-9_]{1,32}$/.test(key) || typeof val !== 'string') continue;
+    const trimmed = val.trim().slice(0, 120);
+    if (trimmed) cleaned[key] = trimmed;
+  }
+  return Object.keys(cleaned).length ? cleaned : null;
+}
+
 async function askFunding(user: Actor, data: Data) {
   const kind = data.kind;
   if (kind !== 'deposit' && kind !== 'withdrawal') fail('invalid-argument', 'Invalid funding type.');
   const amount = cents(data.amount);
   const now = Date.now();
   const ref = db.collection('funding').doc();
-  const result = await mutate(user, data, 'funding.request', [kind, amount], async tx => {
+  const method = typeof data.method === 'string' && data.method.trim()
+    ? data.method.trim().slice(0, 64)
+    : (kind === 'withdrawal' ? 'Bank Transfer' : 'Simulated transfer');
+  const note = typeof data.note === 'string' && data.note.trim() ? data.note.trim().slice(0, 240) : '';
+  const bankDetails = kind === 'withdrawal' ? cleanBankDetails(data.bankDetails) : null;
+  const withdrawalPin = typeof data.withdrawalPin === 'string' ? data.withdrawalPin.trim() : '';
+  const rawReceipt = typeof data.receiptUrl === 'string' ? data.receiptUrl.trim() : '';
+  const receiptUrl = rawReceipt.startsWith('data:image/') && rawReceipt.length <= 450000 ? rawReceipt : '';
+
+  const result = await mutate(user, data, 'funding.request', [kind, amount, method], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (!person.exists) fail('failed-precondition', 'Open the workspace before submitting a request.');
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (kind === 'withdrawal') {
       if (person.get('freezeAmount')) fail('failed-precondition', 'Withdrawals are frozen for this account.');
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
+      const enforcedForm = data.withdrawalPin !== undefined || data.bankDetails !== undefined;
+      if (enforcedForm) {
+        const storedHash = String(person.get('withdrawalPinHash') || '');
+        if (!storedHash) fail('failed-precondition', 'Please set a Withdrawal PIN in Settings first.');
+        if (!withdrawalPin || digest(withdrawalPin) !== storedHash) {
+          fail('permission-denied', 'Incorrect Withdrawal PIN.');
+        }
+        if (bankDetails) {
+          tx.update(profile(user.uid), { savedBank: bankDetails });
+        }
+      }
       changeFunds(tx, user.uid, balance.data(), -amount, amount);
-      ledger(tx, user.uid, 'funding_hold_' + ref.id, 'Withdrawal hold', -amount, amount, now, 'Simulated withdrawal');
+      ledger(tx, user.uid, 'funding_hold_' + ref.id, 'Withdrawal hold', -amount, amount, now, method);
     }
-    tx.create(ref, { uid: user.uid, kind, amount, createdAt: now, status: 'pending', method: 'Simulated transfer' });
+    const docData: Record<string, unknown> = {
+      uid: user.uid,
+      kind,
+      amount,
+      createdAt: now,
+      status: 'pending',
+      method,
+    };
+    if (note) docData.note = note;
+    if (receiptUrl) docData.receiptUrl = receiptUrl;
+    if (bankDetails) docData.details = bankDetails;
+    tx.create(ref, docData);
     return { id: ref.id };
   });
   await bumpSync({ fundingAt: Date.now() }, [user.uid]);
@@ -284,7 +383,16 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
     ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, reason);
     const kindLabel = request.kind === 'deposit' ? 'Deposit' : 'Withdrawal';
     const amtText = '₹' + (Number(request.amount || 0) / 100).toFixed(2);
-    if (asStaff) audit(tx, user, request.uid, kindLabel + ' ' + state, `${kindLabel} ${state} (${amtText}): ${reason}`, now);
+    if (asStaff) {
+      audit(tx, user, request.uid, kindLabel + ' ' + state, `${kindLabel} ${state} (${amtText}): ${reason}`, now);
+      tx.create(db.collection('notifications').doc('funding_' + id), {
+        uid: request.uid,
+        title: `${kindLabel} ${state === 'approved' ? 'Approved' : 'Rejected'}`,
+        message: `${kindLabel} of ${amtText} was ${state}. ${reason}`,
+        type: String(request.kind || 'FUNDING').toUpperCase(),
+        createdAt: now,
+      });
+    }
     return { id, status: state };
   });
   const ts = Date.now();
@@ -292,9 +400,10 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
   return result;
 }
 
-async function page(query: Query, data: Data, scope: unknown, field = 'createdAt', ascending = false) {
+async function page(query: Query, data: Data, scope: unknown, field = 'createdAt', ascending = false, defaultSize = 25) {
   const direction = ascending ? 'asc' : 'desc';
-  const size = 25;
+  const requestedLimit = Number(data.limit);
+  const size = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(100, Math.round(requestedLimit)) : defaultSize;
   let sorted = query.orderBy(field, direction).orderBy(FieldPath.documentId(), direction);
   const key = digest(scope);
   if (data.cursor) {
@@ -314,11 +423,24 @@ async function page(query: Query, data: Data, scope: unknown, field = 'createdAt
 const own = (collection: string, uid: string) => db.collection(collection).where('uid', '==', uid);
 async function home(user: Actor) {
   await settleDue(user.uid);
-  const [person, funds, active] = await Promise.all([
+  const [person, funds, active, settingsSnap] = await Promise.all([
     profile(user.uid).get(), wallet(user.uid).get(),
     own('trades', user.uid).where('status', '==', 'open').orderBy('createdAt', 'desc').limit(8).get(),
+    db.collection('meta').doc('settings').get(),
   ]);
-  return { profile: person.data(), wallet: funds.data(), active: active.docs.map(doc => ({ ...doc.data(), id: doc.id })), serverTime: Date.now() };
+  const rawProfile = person.data() || {};
+  const { withdrawalPinHash, ...safeProfile } = rawProfile as Record<string, unknown>;
+  const settingsData = settingsSnap.data() || {};
+  return {
+    profile: { ...safeProfile, hasWithdrawalPin: Boolean(withdrawalPinHash) },
+    wallet: funds.data(),
+    active: active.docs.map(doc => ({ ...doc.data(), id: doc.id })),
+    depositSettings: {
+      usdtBscAddress: String(settingsData.usdtBscAddress || settingsData.usdtAddress || ''),
+      upiId: String(settingsData.upiId || ''),
+    },
+    serverTime: Date.now(),
+  };
 }
 
 async function message(user: Actor, data: Data, asStaff: boolean) {
@@ -338,11 +460,39 @@ async function message(user: Actor, data: Data, asStaff: boolean) {
   return result;
 }
 async function updateProfile(user: Actor, data: Data) {
-  const name = text(data.name, 50, 2);
-  return mutate(user, data, 'profile.update', [name], async tx => {
-    tx.update(profile(user.uid), { name, nameSearch: name.toLowerCase() });
-    return { name };
+  const rawName = typeof data.name === 'string' ? data.name.trim() : '';
+  const rawPass = typeof data.password === 'string' ? data.password.trim() : '';
+  const rawPin = typeof data.withdrawalPin === 'string' ? data.withdrawalPin.trim() : '';
+  if (!rawName && !rawPass && !rawPin) fail('invalid-argument', 'Enter a name, new password, or withdrawal PIN to update.');
+  if (rawName && (rawName.length < 2 || rawName.length > 50)) fail('invalid-argument', 'Full name must be 2 to 50 characters.');
+  if (rawPass && rawPass.length < 6) fail('invalid-argument', 'Password must be at least 6 characters.');
+  if (rawPin && (rawPin.length < 4 || rawPin.length > 12)) fail('invalid-argument', 'Withdrawal PIN must be 4 to 12 characters.');
+
+  if (rawPass) {
+    await getAuth().updateUser(user.uid, { password: rawPass });
+  }
+  const updates: Record<string, unknown> = {};
+  if (rawName) {
+    updates.name = rawName;
+    updates.nameSearch = rawName.toLowerCase();
+  }
+  if (rawPin) {
+    updates.withdrawalPinHash = digest(rawPin);
+  }
+  const result = await mutate(user, data, 'profile.update', [rawName, Boolean(rawPass), Boolean(rawPin)], async tx => {
+    if (Object.keys(updates).length) tx.update(profile(user.uid), updates);
+    const parts: string[] = [];
+    if (rawName) parts.push(`Name changed to ${rawName}`);
+    if (rawPass) parts.push('Password updated by client');
+    if (rawPin) parts.push('Withdrawal PIN updated by client');
+    if (parts.length) {
+      audit(tx, user, user.uid, 'Client profile updated', parts.join(', '), Date.now());
+    }
+    return { name: rawName || undefined, pinUpdated: Boolean(rawPin), passwordUpdated: Boolean(rawPass) };
   });
+  const ts = Date.now();
+  await bumpSync({ clientsAt: ts, auditAt: ts }, [user.uid]);
+  return result;
 }
 
 async function staffQuery(user: Actor, collection: string) {
@@ -718,15 +868,26 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
         tx.update(profile(user.uid), { notificationReadAt: readAt });
         return { readAt };
       });
+    case 'notifications.clear':
+      return mutate(user, data, op, null, async tx => {
+        const now = Date.now();
+        tx.update(profile(user.uid), { notificationClearAt: now, notificationReadAt: now });
+        return { clearedAt: now };
+      });
     case 'message.send': return message(user, data, false);
     case 'list': {
       const list = text(data.list, 20);
       if (!['trades', 'funding', 'ledger', 'messages', 'notifications'].includes(list)) fail('invalid-argument', 'Invalid list.');
       if (list === 'trades' || list === 'ledger') await settleDue(user.uid);
       if (list === 'notifications') {
-        const snap = await db.collection('notifications').where('uid', '==', user.uid).limit(50).get();
+        const [snap, userSnap] = await Promise.all([
+          db.collection('notifications').where('uid', '==', user.uid).limit(60).get(),
+          profile(user.uid).get(),
+        ]);
+        const clearAt = Number(userSnap.get('notificationClearAt') || 0);
         const rows = snap.docs
-          .map(doc => ({ ...doc.data(), id: doc.id }))
+          .map(doc => ({ ...doc.data(), id: doc.id }) as Data)
+          .filter(row => Number(row.createdAt || 0) > clearAt)
           .sort((a: Data, b: Data) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
         return { rows, cursor: null };
       }

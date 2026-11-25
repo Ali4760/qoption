@@ -1,0 +1,1737 @@
+/* ==========================================================================
+   Qoption Client Workspace — Replica Styling
+   Scoped to #app[data-audience="user"] when .client-app-interface is mounted
+   ========================================================================== */
+
+#app[data-audience="user"] #app-interface {
+  --iq-bg: #060b12;
+  --iq-panel: #0d1520;
+  --iq-panel-2: #111c2a;
+  --iq-border: rgba(148, 178, 208, 0.16);
+  --iq-green: #1fd6a4;
+  --iq-green-hover: #3aefbf;
+  --iq-red: #ff5d72;
+  --iq-red-hover: #ff8a99;
+  --iq-text: #eef5fb;
+  --iq-muted: #8fa3b8;
+  --iq-accent: #e8b86d;
+  --iq-input: #0a121c;
+  --iq-blue: #3aa0ff;
+  --iq-overlay: rgba(5, 11, 16, 0.88);
+  --topbar-height: 54px;
+
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) 260px;
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  height: 100dvh;
+  width: 100%;
+  background: var(--iq-bg);
+  color: var(--iq-text);
+  font-family: "Workspace Outfit", "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+  transition: grid-template-columns 0.25s ease;
+}
+
+#app[data-audience="user"] #app-interface.content-expanded {
+  grid-template-columns: 60px minmax(0, 1fr) 0px;
+}
+
+/* ---------- Top Header ---------- */
+#app-interface .top-bar {
+  grid-column: 1 / 4;
+  background: rgba(10, 18, 28, 0.96);
+  border-bottom: 1px solid rgba(148, 178, 208, 0.14);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  gap: 8px;
+  min-height: var(--topbar-height);
+  z-index: 160;
+}
+
+#app-interface .logo-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+#app-interface .dynamic-project-logo {
+  height: 26px;
+  width: 26px;
+  object-fit: contain;
+  display: inline-block;
+}
+
+#app-interface .logo-text {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: #f4f8fc;
+  white-space: nowrap;
+}
+
+#app-interface .mobile-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(148, 178, 208, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--iq-text);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#app-interface .mobile-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(148, 178, 208, 0.36);
+}
+
+#app-interface .top-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+#app-interface .asset-btn-desk {
+  background: #111c2a;
+  border: 1px solid rgba(148, 178, 208, 0.18);
+  border-radius: 10px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: #e8f0f7;
+  max-width: 135px;
+  flex-shrink: 0;
+}
+#app-interface .asset-btn-desk:hover {
+  background: #152334;
+  border-color: rgba(148, 178, 208, 0.32);
+}
+
+#app-interface .asset-pill-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 8px;
+  font-weight: 900;
+  color: #04120d;
+  background: #f7931a;
+  flex-shrink: 0;
+}
+
+#app-interface #headerAsset {
+  font-weight: 800;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#app-interface .balance-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+#app-interface .hdr-ico {
+  position: relative;
+  cursor: pointer;
+  color: #d8e5f2;
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+#app-interface .hdr-ico:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+#app-interface .notif-badge,
+#app-interface .msg-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #e24b5f;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+#app-interface .balance-display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  text-align: right;
+  line-height: 1.15;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 178, 208, 0.16);
+  cursor: pointer;
+  min-width: 92px;
+  flex-shrink: 0;
+}
+#app-interface .balance-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #8fa3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#app-interface .balance-val {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1fd6a4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Desktop Left Icon Rail ---------- */
+#app-interface .left-sidebar {
+  grid-row: 2 / 3;
+  grid-column: 1 / 2;
+  background: linear-gradient(180deg, #0e1724, #0b131d);
+  border-right: 1px solid rgba(148, 178, 208, 0.12);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0 16px;
+  gap: 10px;
+}
+
+#app-interface .menu-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8fa3b8;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  transition: 0.18s;
+}
+#app-interface .menu-icon:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+#app-interface .menu-icon.active {
+  color: #e8b86d;
+  background: rgba(232, 184, 109, 0.14);
+}
+#app-interface .menu-icon.logout-ico {
+  margin-top: auto;
+  color: var(--iq-red);
+}
+
+/* ---------- Slide-out Navigation Drawer (Screenshot 1) ---------- */
+#app-interface .mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 13, 0.65);
+  z-index: 200;
+  display: none;
+}
+#app-interface .mobile-overlay.open {
+  display: block;
+}
+
+#app-interface #mobileSidebar {
+  position: fixed;
+  top: 0;
+  left: -300px;
+  width: min(76vw, 275px);
+  height: 100dvh;
+  background: linear-gradient(180deg, #0c1420 0%, #09101a 100%);
+  border-right: 1px solid rgba(148, 178, 208, 0.14);
+  box-shadow: 16px 0 48px rgba(0, 0, 0, 0.55);
+  z-index: 210;
+  transition: left 0.25s ease;
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+#app-interface #mobileSidebar.open {
+  left: 0;
+}
+
+#app-interface .mobile-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+#app-interface .menu-heading {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin: 0 0 14px;
+}
+
+#app-interface .mobile-nav-item {
+  width: 100%;
+  padding: 15px 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: #eef5fb;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  border-radius: 8px;
+}
+#app-interface .mobile-nav-item:hover,
+#app-interface .mobile-nav-item.active {
+  background: rgba(31, 214, 164, 0.1);
+  color: #5eefc4;
+}
+#app-interface .mobile-nav-item.logout-nav {
+  color: #ff5d72;
+}
+#app-interface .mobile-nav-item svg {
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+/* ---------- Main Stage & Content Overlays ---------- */
+#app-interface .main-stage {
+  grid-row: 2 / 3;
+  grid-column: 2 / 3;
+  background: #0a121c;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+#app-interface #tv_chart_container {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+#app-interface .chart-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100%;
+  height: 100%;
+  background: #0a121c;
+}
+
+#app-interface .chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(13, 21, 32, 0.94);
+  border-bottom: 1px solid rgba(148, 178, 208, 0.12);
+}
+
+#app-interface .chart-market-info {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+#app-interface .chart-symbol-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 214, 164, 0.34);
+  background: rgba(31, 214, 164, 0.12);
+  color: #5eefc4;
+}
+
+#app-interface .chart-market-name {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  color: #f4f8fc;
+  font-size: 14px;
+  font-weight: 800;
+}
+#app-interface .chart-market-subtitle {
+  color: #8fa3b8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#app-interface .chart-timeframes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+}
+
+#app-interface .chart-timeframe {
+  min-width: 42px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #96a3b5;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#app-interface .chart-timeframe:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+#app-interface .chart-timeframe.active {
+  border-color: rgba(31, 214, 164, 0.34);
+  background: rgba(31, 214, 164, 0.12);
+  color: #5eefc4;
+}
+
+#app-interface .chart-plot {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#app-interface #market-chart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+#app-interface #market-chart:active {
+  cursor: grabbing;
+}
+
+#app-interface .chart-live-marker {
+  --live-marker-color: #0d6efd;
+  --live-marker-glow: rgba(13, 110, 253, 0.85);
+  position: absolute;
+  z-index: 2;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--live-marker-color);
+  border-radius: 50%;
+  background: #d9edff;
+  box-shadow: 0 0 10px var(--live-marker-glow);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+#app-interface .chart-live-marker.price-tick-up {
+  --live-marker-color: #00d084;
+  --live-marker-glow: rgba(0, 208, 132, 0.85);
+  background: #d9ffef;
+}
+#app-interface .chart-live-marker.price-tick-down {
+  --live-marker-color: #ff5b64;
+  --live-marker-glow: rgba(255, 91, 100, 0.85);
+  background: #ffe3e5;
+}
+#app-interface .chart-live-marker::after {
+  position: absolute;
+  inset: -6px;
+  border: 1px solid var(--live-marker-color);
+  border-radius: inherit;
+  content: "";
+  animation: chartLivePulse 1.6s ease-out infinite;
+}
+@keyframes chartLivePulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+#app-interface .chart-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 14px;
+  border-top: 1px solid rgba(148, 178, 208, 0.12);
+  color: #8fa3b8;
+  font-size: 11px;
+  font-weight: 700;
+}
+#app-interface .chart-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1fd6a4;
+  box-shadow: 0 0 8px rgba(31, 214, 164, 0.6);
+}
+
+#app-interface .content-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--iq-bg);
+  z-index: 40;
+  padding: 20px 16px 32px;
+  overflow-y: auto;
+  display: none;
+}
+#app-interface .content-overlay.active {
+  display: block;
+}
+
+/* ---------- Right Trade Sidebar ---------- */
+#app-interface .right-sidebar {
+  grid-row: 2 / 3;
+  grid-column: 3 / 4;
+  background: linear-gradient(180deg, #0e1724, #0b131d);
+  border-left: 1px solid rgba(148, 178, 208, 0.12);
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+#app-interface .right-sidebar:not(.is-market-panel) {
+  display: none !important;
+}
+
+#app-interface .control-group {
+  margin-bottom: 14px;
+}
+#app-interface .control-label {
+  font-size: 11px;
+  color: #9eb2c6;
+  text-transform: uppercase;
+  font-weight: 800;
+  margin-bottom: 6px;
+  display: block;
+  letter-spacing: 0.05em;
+}
+
+#app-interface .iq-input {
+  background: #111c2a;
+  border: 1px solid rgba(148, 178, 208, 0.18);
+  border-radius: 10px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+}
+#app-interface .iq-input button.step-btn {
+  background: transparent;
+  border: 0;
+  color: #cbd8e6;
+  cursor: pointer;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+}
+#app-interface .iq-input input {
+  background: transparent;
+  border: 0;
+  min-height: 0;
+  padding: 0;
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  width: 100%;
+  text-align: center;
+  outline: none;
+}
+
+#app-interface .iq-dropdown {
+  position: relative;
+  cursor: pointer;
+}
+#app-interface .iq-dropdown-head,
+#app-interface .asset-select-head {
+  background: #111c2a;
+  border: 1px solid rgba(148, 178, 208, 0.18);
+  border-radius: 10px;
+  height: 40px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #eef5fb;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+#app-interface .iq-dropdown-list,
+#app-interface .asset-select-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: #111c2a;
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  border-radius: 12px;
+  margin-top: 6px;
+  z-index: 250;
+  max-height: 280px;
+  overflow-y: auto;
+  display: none;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+}
+#app-interface .iq-dropdown-list.show,
+#app-interface .asset-select-list.show {
+  display: block;
+}
+
+#app-interface .iq-dropdown-item,
+#app-interface .asset-select-item {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #c5d4e2;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+#app-interface .iq-dropdown-item:hover,
+#app-interface .asset-select-item:hover {
+  background: rgba(31, 214, 164, 0.08);
+  color: #fff;
+}
+#app-interface .iq-dropdown-item.selected,
+#app-interface .asset-select-item.active {
+  color: #e8b86d;
+}
+
+#app-interface .profit-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+#app-interface .profit-percent {
+  font-size: 26px;
+  font-weight: 800;
+  color: #1fd6a4;
+}
+
+#app-interface .order-book {
+  margin-bottom: 14px;
+  background: rgba(8, 14, 22, 0.55);
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 178, 208, 0.14);
+}
+#app-interface .ob-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#app-interface .ob-hist-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(148, 178, 208, 0.22);
+  color: #dce6f0;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+#app-interface .ob-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 3px;
+  font-family: monospace;
+}
+#app-interface .ob-ask { color: #ff5d72; font-weight: 700; }
+#app-interface .ob-bid { color: #1fd6a4; font-weight: 700; }
+#app-interface .ob-amt { color: #9aa2b4; }
+
+#app-interface .trade-buttons {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#app-interface .btn-trade-iq {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 13px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 54px;
+}
+#app-interface .btn-call {
+  background: linear-gradient(135deg, #22e0ad, #14b889);
+  color: #04150f;
+  box-shadow: 0 8px 24px rgba(31, 214, 164, 0.28);
+}
+#app-interface .btn-put {
+  background: linear-gradient(135deg, #ff6d80, #e24b5f);
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(255, 93, 114, 0.25);
+}
+#app-interface .btn-sub {
+  font-size: 10px;
+  opacity: 0.85;
+  font-weight: 700;
+  display: block;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------- Top Assets Overlay Grid ---------- */
+#app-interface .coin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 10px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+#app-interface .coin-flash-item {
+  background: var(--iq-panel);
+  padding: 12px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid var(--iq-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#app-interface .coin-flash-item:hover {
+  border-color: rgba(31, 214, 164, 0.45);
+  background: #121f30;
+}
+
+/* ---------- Assets / Wallet Page (Screenshots 4, 5, 6) ---------- */
+#app-interface .wallet-wrap {
+  max-width: 500px;
+  margin: 0 auto;
+}
+#app-interface .wallet-page-h {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 18px;
+}
+#app-interface .wallet-card-dark {
+  background: var(--iq-panel);
+  border: 1px solid var(--iq-border);
+  border-radius: 14px;
+  padding: 28px 20px;
+  text-align: center;
+  margin-bottom: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+#app-interface .wallet-card-dark small {
+  color: #c5d2df;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#app-interface .wallet-card-dark h2 {
+  font-family: "Workspace Outfit", sans-serif;
+  color: #ffffff;
+  font-size: 30px;
+  font-weight: 800;
+  margin: 10px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+#app-interface .asset-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+#app-interface .asset-tab-btn {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--iq-border);
+  background: var(--iq-input);
+  color: var(--iq-muted);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+}
+#app-interface .asset-tab-btn.active {
+  background: linear-gradient(135deg, #22e0ad, #14b889);
+  color: #04150f;
+  border-color: transparent;
+}
+
+#app-interface .wallet-box-card {
+  background: var(--iq-panel);
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid var(--iq-border);
+}
+#app-interface .wallet-box-title {
+  color: #ffffff;
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  margin: 0 0 14px;
+}
+
+#app-interface .method-btn-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(58, 160, 255, 0.45);
+}
+#app-interface .method-chip-btn {
+  padding: 10px 8px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 0;
+  cursor: pointer;
+  background: rgba(58, 160, 255, 0.08);
+  color: #7ec0ff;
+}
+#app-interface .method-chip-btn.active {
+  background: #3aa0ff;
+  color: #041018;
+}
+
+#app-interface .replica-input {
+  width: 100%;
+  min-height: 44px;
+  background: var(--iq-input);
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  color: #eef5fb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-size: 14px;
+}
+#app-interface .replica-input.centered {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+#app-interface .amt-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+#app-interface .amt-btn {
+  background: var(--iq-input);
+  border: 1px solid var(--iq-border);
+  color: #eef5fb;
+  padding: 12px 8px;
+  text-align: center;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  font-size: 13px;
+}
+#app-interface .amt-btn.active,
+#app-interface .amt-btn:hover {
+  border-color: var(--iq-green);
+  background: rgba(31, 214, 164, 0.12);
+  color: var(--iq-green);
+}
+
+#app-interface .qr-box-wrap {
+  text-align: center;
+  margin-top: 12px;
+}
+#app-interface .qr-frame {
+  background: var(--iq-input);
+  border: 1px solid var(--iq-border);
+  padding: 10px;
+  display: inline-block;
+  border-radius: 12px;
+}
+#app-interface .dep-addr-row {
+  color: var(--iq-green);
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  word-break: break-all;
+}
+
+#app-interface .replica-file-input {
+  width: 100%;
+  background: var(--iq-input);
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  color: #9eb2c6;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+#app-interface .replica-primary-btn {
+  width: 100%;
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #22e0ad, #14b889);
+  color: #04150f;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+#app-interface .replica-support-btn {
+  width: 100%;
+  height: 44px;
+  margin-top: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 214, 164, 0.35);
+  background: linear-gradient(135deg, rgba(34, 224, 173, 0.16), rgba(20, 184, 137, 0.14));
+  color: #5eefc4;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+#app-interface .wd-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+#app-interface .autofill-btn {
+  background: rgba(58, 160, 255, 0.1);
+  border: 1px solid rgba(58, 160, 255, 0.55);
+  color: #6db6ff;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+#app-interface .wd-bank-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+#app-interface .field-stack {
+  margin-bottom: 14px;
+}
+
+/* ---------- Settings / Profile Page (Screenshot 3) ---------- */
+#app-interface .profile-wrap {
+  max-width: 600px;
+  margin: 0 auto;
+}
+#app-interface .profile-hero {
+  background: var(--iq-panel);
+  border: 1px solid var(--iq-border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+#app-interface .prof-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--iq-input);
+  border: 2px solid var(--iq-green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+#app-interface .prof-name {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 10px;
+}
+#app-interface .prof-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+#app-interface .prof-stat-box {
+  background: var(--iq-input);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--iq-border);
+}
+#app-interface .prof-stat-label {
+  font-size: 10px;
+  color: #8fa3b8;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+#app-interface .prof-stat-val {
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 3px;
+}
+
+/* ---------- History Pages (Transaction History & Screenshot 7 Trade History) ---------- */
+#app-interface .history-shell {
+  max-width: 1120px;
+  margin: 0 auto 14px;
+}
+#app-interface .history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+#app-interface .history-title {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  color: #ffffff;
+  margin: 0;
+  font-weight: 800;
+  font-size: 26px;
+}
+#app-interface .history-subtitle {
+  color: #b8c0d6;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+#app-interface .history-chip-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(115px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 540px;
+}
+#app-interface .history-chip {
+  border: 1px solid rgba(148, 178, 208, 0.16);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #162231, #0e1622);
+  padding: 12px;
+}
+#app-interface .history-chip-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9eb2c6;
+}
+#app-interface .history-chip-value {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+#app-interface .history-chip-value.positive { color: var(--iq-green); }
+#app-interface .history-chip-value.negative { color: var(--iq-red); }
+
+#app-interface .history-toolbar {
+  background: linear-gradient(180deg, rgba(17, 28, 42, 0.92), rgba(11, 18, 28, 0.94));
+  border: 1px solid rgba(148, 178, 208, 0.16);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(200px, 1.6fr) repeat(4, minmax(120px, 1fr)) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+#app-interface .history-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0a121c;
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  border-radius: 10px;
+  padding: 0 10px;
+  min-height: 40px;
+  color: #8fa3b8;
+}
+#app-interface .history-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #eef5fb;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+  min-height: 36px;
+  padding: 0;
+}
+#app-interface .history-select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  border-radius: 10px;
+  background: #0a121c;
+  color: #eef5fb;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 10px;
+}
+#app-interface .history-btn {
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 178, 208, 0.22);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eef5fb;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 0 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#app-interface .history-table-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  border: 1px solid var(--iq-border);
+  border-radius: 14px;
+  background: var(--iq-panel);
+  overflow-x: auto;
+}
+#app-interface .iq-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #dce6f0;
+  font-size: 13px;
+}
+#app-interface .iq-table th {
+  text-align: left;
+  color: #9eb2c6;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--iq-border);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  background: rgba(17, 28, 42, 0.95);
+}
+#app-interface .iq-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+#app-interface .hist-type-pill,
+#app-interface .hist-result-pill,
+#app-interface .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+#app-interface .hist-type-pill.deposit,
+#app-interface .hist-result-pill.win,
+#app-interface .badge-success {
+  color: #1fd6a4;
+  background: rgba(31, 214, 164, 0.14);
+  border: 1px solid rgba(31, 214, 164, 0.35);
+}
+#app-interface .hist-type-pill.withdrawal,
+#app-interface .hist-result-pill.loss,
+#app-interface .badge-danger {
+  color: #ff5d72;
+  background: rgba(255, 93, 114, 0.14);
+  border: 1px solid rgba(255, 93, 114, 0.35);
+}
+#app-interface .hist-result-pill.open,
+#app-interface .badge-pending {
+  color: #e8b86d;
+  background: rgba(232, 184, 109, 0.16);
+  border: 1px solid rgba(232, 184, 109, 0.35);
+}
+#app-interface .history-action-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ---------- Leaderboard Page (Screenshot 8) ---------- */
+#app-interface .lb-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+}
+#app-interface .lb-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+#app-interface .lb-title {
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+#app-interface .lb-sub {
+  font-size: 13px;
+  color: #8fa3b8;
+  margin-top: 4px;
+  font-weight: 600;
+}
+#app-interface .lb-note {
+  border: 1px solid rgba(232, 184, 109, 0.35);
+  background: rgba(232, 184, 109, 0.09);
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: #f6d4a6;
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 480px;
+}
+#app-interface .lb-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+#app-interface .lb-card {
+  background: var(--iq-panel);
+  border: 1px solid var(--iq-border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+#app-interface .lb-rank {
+  font-size: 11px;
+  font-weight: 800;
+  color: #8fa3b8;
+  text-transform: uppercase;
+}
+#app-interface .lb-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 6px;
+}
+#app-interface .lb-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #9eb2c6;
+  font-weight: 700;
+}
+#app-interface .lb-val {
+  font-family: monospace;
+  font-weight: 800;
+}
+#app-interface .lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--iq-panel);
+  border: 1px solid var(--iq-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+#app-interface .lb-table th,
+#app-interface .lb-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+  font-size: 13px;
+}
+#app-interface .lb-table th {
+  font-size: 10px;
+  color: #8fa3b8;
+  text-transform: uppercase;
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.22);
+}
+#app-interface .lb-green { color: #1fd6a4; font-weight: 800; }
+#app-interface .lb-muted { color: #8fa3b8; font-weight: 700; }
+
+#app-interface .lb-events-h {
+  color: #fff;
+  font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
+  margin: 26px 0 12px;
+  font-weight: 800;
+  font-size: 18px;
+}
+#app-interface .lb-event-card {
+  background: linear-gradient(135deg, #121c2a 0%, #192536 100%);
+  border: 1px solid var(--iq-border);
+  padding: 18px 20px;
+  border-radius: 14px;
+  margin-bottom: 12px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+#app-interface .lb-event-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #e8b86d;
+  color: #0b121c;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-bottom-left-radius: 10px;
+}
+
+/* ---------- Header Dropdowns (Messages & Notifications) ---------- */
+#app-interface #notifOverlay,
+#app-interface #msgOverlay {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  width: min(370px, calc(100vw - 24px));
+  max-height: 78dvh;
+  overflow-y: auto;
+  background: var(--iq-panel);
+  border: 1px solid var(--iq-border);
+  border-radius: 12px;
+  z-index: 190;
+  display: none;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.75);
+}
+#app-interface #notifOverlay.open,
+#app-interface #msgOverlay.open {
+  display: block;
+}
+#app-interface .overlay-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+#app-interface .overlay-title {
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+}
+#app-interface .overlay-actions {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 800;
+}
+#app-interface .overlay-action-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 800;
+}
+#app-interface .notif-item,
+#app-interface .msg-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+#app-interface .notif-title {
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  margin-bottom: 3px;
+}
+#app-interface .notif-body {
+  font-size: 12px;
+  color: #9eb2c6;
+  line-height: 1.45;
+}
+#app-interface .notif-time {
+  font-size: 10px;
+  color: #7d92a8;
+  text-align: right;
+  margin-top: 5px;
+}
+#app-interface .msg-convo {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+#app-interface .msg-bubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+#app-interface .msg-bubble.theirs {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8ebf2;
+}
+#app-interface .msg-bubble.mine {
+  align-self: flex-end;
+  background: #3aa0ff;
+  color: #fff;
+}
+#app-interface .msg-reply-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+#app-interface .msg-reply-form textarea {
+  flex: 1;
+  min-height: 38px;
+  max-height: 90px;
+  resize: none;
+  background: #0a121c;
+  border: 1px solid var(--iq-border);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+#app-interface .msg-send-btn {
+  padding: 0 14px;
+  height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: #3aa0ff;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ---------- Modal Overlays (Confirm Trade, Active Trade, Result, Txn Detail, Receipt, Alert) ---------- */
+#app-interface .replica-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 11, 16, 0.88);
+  backdrop-filter: blur(5px);
+  z-index: 250;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+#app-interface .replica-modal-backdrop.open {
+  display: flex;
+}
+
+#app-interface .trade-confirm-card,
+#app-interface .blind-card,
+#app-interface .result-card,
+#app-interface .alert-box,
+#app-interface .txn-detail-card {
+  width: min(390px, 100%);
+  background: linear-gradient(155deg, #152334, #0f1a26);
+  border: 1px solid rgba(148, 178, 208, 0.22);
+  border-radius: 16px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72);
+  overflow: hidden;
+  color: #eef5fb;
+}
+#app-interface .txn-detail-card {
+  width: min(500px, 100%);
+  padding: 22px;
+}
+#app-interface .blind-card,
+#app-interface .result-card,
+#app-interface .alert-box {
+  padding: 26px 22px;
+  text-align: center;
+}
+#app-interface .trade-confirm-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(8, 14, 22, 0.45);
+}
+#app-interface .trade-confirm-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+#app-interface .trade-confirm-body {
+  padding: 16px;
+}
+#app-interface .trade-confirm-pair {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+#app-interface .dir-pill {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 11px;
+}
+#app-interface .dir-pill.up { background: rgba(31, 214, 164, 0.14); color: #1fd6a4; border: 1px solid rgba(31, 214, 164, 0.35); }
+#app-interface .dir-pill.down { background: rgba(255, 93, 114, 0.14); color: #ff5d72; border: 1px solid rgba(255, 93, 114, 0.35); }
+
+#app-interface .tc-opt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 12px 0;
+}
+#app-interface .tc-opt {
+  background: #0a121c;
+  border: 1px solid var(--iq-border);
+  border-radius: 12px;
+  padding: 11px 12px;
+  cursor: pointer;
+}
+#app-interface .tc-opt.active {
+  border-color: #e8b86d;
+  box-shadow: 0 0 0 1px rgba(232, 184, 109, 0.4);
+}
+#app-interface .tc-opt .t1 { font-weight: 800; font-size: 13px; color: #fff; }
+#app-interface .tc-opt .t2 { font-size: 11px; color: #8fa3b8; margin-top: 3px; }
+#app-interface .tc-est {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#app-interface .trade-confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+#app-interface .btn-confirm {
+  height: 42px;
+  border-radius: 10px;
+  border: 0;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+#app-interface .btn-confirm.cancel {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(148, 178, 208, 0.2);
+  color: #dce6f0;
+}
+#app-interface .btn-confirm.go.up {
+  background: linear-gradient(135deg, #22e0ad, #14b889);
+  color: #04150f;
+}
+#app-interface .btn-confirm.go.down {
+  background: linear-gradient(135deg, #ff6d80, #e24b5f);
+  color: #ffffff;
+}
+
+#app-interface .blind-timer {
+  font-size: 48px;
+  font-weight: 900;
+  font-family: monospace;
+  margin: 12px 0;
+  color: #fff;
+}
+#app-interface .blind-label {
+  font-size: 10px;
+  color: #8fa3b8;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+#app-interface .blind-val {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+/* ---------- Mobile / Portrait Responsive Layout ---------- */
+@media (max-width: 900px) {
+  #app[data-audience="user"] #app-interface {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 54px minmax(0, 1fr) 0px;
+  }
+  #app[data-audience="user"] #app-interface.market-active {
+    grid-template-rows: 54px minmax(0, 1fr) 74px;
+  }
+  #app[data-audience="user"] #app-interface.content-expanded {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 54px minmax(0, 1fr);
+  }
+  #app-interface .left-sidebar {
+    display: none;
+  }
+  #app-interface .top-bar {
+    grid-column: 1 / -1;
+    padding: 0 8px;
+  }
+  #app-interface .main-stage {
+    grid-column: 1 / 2;
+    grid-row: 2 / 3;
+  }
+  #app-interface .right-sidebar {
+    grid-column: 1 / 2;
+    grid-row: 3 / 4;
+    border-left: 0;
+    border-top: 1px solid rgba(148, 178, 208, 0.14);
+    padding: 8px 10px;
+    overflow: hidden;
+  }
+  #app-interface .right-sidebar .control-group,
+  #app-interface .right-sidebar .profit-info,
+  #app-interface .right-sidebar .order-book {
+    display: none !important;
+  }
+  #app-interface .trade-buttons {
+    flex-direction: row;
+    gap: 10px;
+    margin-top: 0;
+  }
+  #app-interface .btn-trade-iq {
+    flex: 1;
+    padding: 10px 14px;
+    min-height: 54px;
+    font-size: 16px;
+  }
+  #app-interface .logo-group .dynamic-project-logo,
+  #app-interface .logo-group .logo-text {
+    display: none;
+  }
+  #app-interface .wd-bank-grid {
+    grid-template-columns: 1fr;
+  }
+  #app-interface .lb-cards {
+    grid-template-columns: 1fr;
+  }
+  #app-interface .history-chip-row {
+    grid-template-columns: 1fr 1fr;
+    max-width: 100%;
+  }
+  #app-interface .history-toolbar {
+    grid-template-columns: 1fr;
+  }
+  #app-interface .iq-table,
+  #app-interface .iq-table thead,
+  #app-interface .iq-table tbody,
+  #app-interface .iq-table tr,
+  #app-interface .iq-table td {
+    display: block;
+    width: 100%;
+  }
+  #app-interface .iq-table thead {
+    display: none;
+  }
+  #app-interface .iq-table tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--iq-border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    background: linear-gradient(145deg, rgba(19, 30, 44, 0.9), rgba(12, 20, 30, 0.95));
+  }
+  #app-interface .iq-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+    text-align: right;
+  }
+  #app-interface .iq-table td:last-child {
+    border-bottom: 0;
+  }
+  #app-interface .iq-table td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 800;
+    color: #8fa3b8;
+    text-transform: uppercase;
+    text-align: left;
+    flex-shrink: 0;
+  }
+}

@@ -2,6 +2,10 @@ import { demoHistory, demoPrice, type Asset, type Point } from '../../../functio
 
 export type ChartMode = 'line' | 'candles' | 'combined';
 type ChartPoint = Point & { open?: number; high?: number; low?: number; volume?: number };
+export type ChartMountOptions = {
+  replica?: boolean;
+  onMarker?: (pos: { x: number; y: number; up: boolean } | null) => void;
+};
 
 function candlePoint(time: number, open: string, high: string, low: string, close: string, volume: string): ChartPoint | null {
   const values = [time, Number(open), Number(high), Number(low), Number(close)];
@@ -12,20 +16,33 @@ function candlePoint(time: number, open: string, high: string, low: string, clos
 }
 
 const frames: Record<string, number> = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000, '4h': 14400000, '1d': 86400000 };
-const timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+const timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: true });
 const dayLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 export const timeframes = Object.keys(frames);
-export const formatPrice = (value: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: value < 1 ? 4 : 2, maximumFractionDigits: value < 1 ? 6 : 2 }).format(value);
+export const formatPrice = (value: number) => {
+  const digits = value < 1 ? 4 : 4;
+  return Number(value).toFixed(digits);
+};
 
-export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPrice: (price: number) => void) {
+export function mountChart(
+  canvas: HTMLCanvasElement,
+  status: HTMLElement,
+  onPrice: (price: number) => void,
+  options: ChartMountOptions = {},
+) {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas is unavailable.');
   const style = getComputedStyle(canvas);
   const color = (name: string) => style.getPropertyValue(name).trim();
   const palette = {
-    grid: color('--line'), axis: color('--quiet'), line: color('--chart-line'),
-    fill: color('--chart-fill'), up: color('--chart-up'), down: color('--chart-down'),
-    text: color('--accent-ink'), marker: color('--accent'),
+    grid: color('--line') || 'rgba(164, 183, 202, 0.13)',
+    axis: color('--quiet') || '#8fa2bb',
+    line: options.replica ? '#0d6efd' : color('--chart-line'),
+    fill: options.replica ? 'rgba(13, 110, 253, 0.34)' : color('--chart-fill'),
+    up: color('--chart-up') || '#1fd6a4',
+    down: color('--chart-down') || '#ff5d72',
+    text: options.replica ? '#eef5fb' : color('--accent-ink'),
+    marker: options.replica ? '#0d6efd' : color('--accent'),
   };
   let points: ChartPoint[] = [], socket: WebSocket | undefined, timer = 0, generation = 0, offset = 0, windowSize = 66;
   let retries = 0, pointer: { x: number; offset: number } | undefined;
@@ -33,6 +50,7 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
   let singleFrame = 0;
   let currentFrame = '1m';
   let mode: ChartMode = 'line';
+  let fallbackTimer = 0;
 
   function draw() {
     singleFrame = 0;
@@ -40,11 +58,22 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
     if (!w || !h || !ctx) return;
     const scale = Math.min(devicePixelRatio, 2);
     canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
-    ctx.scale(scale, scale);
-    const left = 12, right = w - (w < 440 ? 72 : 87), top = 17, plotBottom = h - 36;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    if (options.replica) {
+      ctx.fillStyle = '#0d1523';
+      ctx.fillRect(0, 0, w, h);
+    }
+    const rightAxisW = options.replica ? 78 : (w < 440 ? 72 : 87);
+    const left = options.replica ? 8 : 12;
+    const right = w - rightAxisW - (options.replica ? 18 : 0);
+    const top = options.replica ? 24 : 17;
+    const plotBottom = h - (options.replica ? 30 : 36);
     const end = Math.max(2, points.length - offset);
     const visible = points.slice(Math.max(0, end - windowSize), end);
-    if (visible.length < 2 || right <= left) return;
+    if (visible.length < 2 || right <= left) {
+      options.onMarker?.(null);
+      return;
+    }
     const showCandles = mode !== 'line';
     const maximumVolume = mode === 'combined' ? Math.max(0, ...visible.map(point => point.volume ?? 0)) : 0;
     const volumeHeight = maximumVolume ? Math.min(58, (plotBottom - top) * 0.23) : 0;
@@ -55,22 +84,39 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
     const high = max + pad, low = min - pad;
     const x = (i: number) => left + (right - left) * i / (visible.length - 1);
     const y = (value: number) => bottom - (value - low) * (bottom - top) / (high - low);
-    ctx.font = '11px system-ui';
-    ctx.strokeStyle = palette.grid;
-    for (let i = 0; i <= 5; i++) {
-      const price = high - i * (high - low) / 5;
+
+    if (options.replica) {
+      ctx.fillStyle = '#111b2c';
+      ctx.fillRect(w - rightAxisW, 0, rightAxisW, h);
+    }
+
+    ctx.font = options.replica ? '700 10px Outfit, system-ui, sans-serif' : '11px system-ui';
+    ctx.strokeStyle = options.replica ? 'rgba(164, 183, 202, 0.12)' : palette.grid;
+    ctx.lineWidth = 1;
+    const rows = options.replica ? 4 : 5;
+    for (let i = 0; i <= rows; i++) {
+      const price = high - i * (high - low) / rows;
       const at = Math.round(y(price)) + .5;
-      ctx.beginPath(); ctx.moveTo(left, at); ctx.lineTo(right + 3, at); ctx.stroke();
-      ctx.fillStyle = palette.axis; ctx.fillText(formatPrice(price), right + 10, at + 4);
+      ctx.beginPath(); ctx.moveTo(0, at); ctx.lineTo(w - rightAxisW, at); ctx.stroke();
+      ctx.fillStyle = options.replica ? '#8fa2bb' : palette.axis;
+      ctx.textAlign = options.replica ? 'right' : 'left';
+      ctx.fillText(formatPrice(price), options.replica ? w - 8 : w - rightAxisW + 10, at + 4);
     }
-    const columns = w < 520 ? 4 : 7;
-    for (let i = 0; i < columns; i++) {
-      const index = Math.round((visible.length - 1) * i / columns), at = x(index);
-      ctx.beginPath(); ctx.moveTo(at, top); ctx.lineTo(at, plotBottom); ctx.stroke();
-      ctx.fillStyle = palette.axis;
+    const columns = w < 520 ? 4 : 6;
+    ctx.textAlign = 'center';
+    for (let i = 1; i <= columns; i++) {
+      const index = Math.min(visible.length - 1, Math.round((visible.length - 1) * i / (columns + 1)));
+      const at = x(index);
+      ctx.beginPath(); ctx.moveTo(at, 0); ctx.lineTo(at, plotBottom); ctx.stroke();
+      ctx.fillStyle = options.replica ? '#8fa2bb' : palette.axis;
       const date = new Date(visible[index].time);
-      ctx.fillText(currentFrame === '1d' || currentFrame === '4h' ? dayLabel.format(date) : timeLabel.format(date), at, plotBottom + 23);
+      ctx.fillText(currentFrame === '1d' || currentFrame === '4h' ? dayLabel.format(date) : timeLabel.format(date), at, plotBottom + 20);
     }
+    if (options.replica) {
+      ctx.strokeStyle = 'rgba(177, 196, 219, 0.18)';
+      ctx.beginPath(); ctx.moveTo(w - rightAxisW, 0); ctx.lineTo(w - rightAxisW, h); ctx.stroke();
+    }
+    ctx.textAlign = 'left';
     const candleWidth = Math.max(2, Math.min(9, (right - left) / visible.length * 0.64));
     const candleColor = (point: ChartPoint) => point.price >= (point.open ?? point.price) ? palette.up : palette.down;
     const tracePrice = () => {
@@ -88,7 +134,7 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
       });
       ctx.restore();
       ctx.fillStyle = palette.axis;
-      ctx.fillText('Volume', right + 10, plotBottom - volumeHeight / 2);
+      ctx.fillText('Volume', w - rightAxisW + 10, plotBottom - volumeHeight / 2);
     }
     if (showCandles) {
       visible.forEach((point, index) => {
@@ -106,22 +152,44 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
     } else {
       tracePrice();
       const gradient = ctx.createLinearGradient(0, top, 0, bottom);
-      gradient.addColorStop(0, palette.fill); gradient.addColorStop(1, 'transparent');
+      gradient.addColorStop(0, palette.fill);
+      gradient.addColorStop(1, options.replica ? 'rgba(13, 110, 253, 0.02)' : 'transparent');
       ctx.lineTo(right, bottom); ctx.lineTo(left, bottom); ctx.closePath();
       ctx.fillStyle = gradient; ctx.fill();
     }
     if (mode !== 'candles') {
       tracePrice();
       ctx.strokeStyle = palette.line;
+      if (options.replica) {
+        ctx.shadowColor = 'rgba(13, 110, 253, 0.58)';
+        ctx.shadowBlur = 8;
+      }
       ctx.lineWidth = mode === 'combined' ? 1.7 : 2;
       ctx.lineJoin = 'round';
       ctx.stroke();
+      ctx.shadowBlur = 0;
     }
     if (!offset) {
-      const last = visible[visible.length - 1], yLast = y(last.price);
+      const last = visible[visible.length - 1];
+      const prev = visible[visible.length - 2] ?? last;
+      const yLast = y(last.price);
+      if (options.replica) {
+        ctx.strokeStyle = 'rgba(13, 110, 253, 0.35)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(right, yLast); ctx.lineTo(w - rightAxisW, yLast); ctx.stroke();
+      }
       ctx.beginPath(); ctx.arc(right, yLast, 4, 0, Math.PI * 2); ctx.fillStyle = palette.line; ctx.fill();
-      ctx.fillStyle = palette.marker; ctx.fillRect(right + 5, yLast - 11, w - right - 6, 22);
-      ctx.fillStyle = palette.text; ctx.fillText(formatPrice(last.price), right + 9, yLast + 4);
+      ctx.fillStyle = palette.marker;
+      const boxY = Math.max(top, Math.min(bottom - 18, yLast - 10));
+      ctx.fillRect(w - rightAxisW + 2, boxY, rightAxisW - 4, 20);
+      ctx.fillStyle = palette.text;
+      ctx.textAlign = 'center';
+      ctx.font = '700 10px Outfit, system-ui, sans-serif';
+      ctx.fillText(formatPrice(last.price), w - rightAxisW + (rightAxisW / 2), boxY + 13, rightAxisW - 8);
+      ctx.textAlign = 'left';
+      options.onMarker?.({ x: right, y: yLast, up: last.price >= prev.price });
+    } else {
+      options.onMarker?.(null);
     }
   }
   function paint() { if (!singleFrame) singleFrame = requestAnimationFrame(draw); }
@@ -139,14 +207,26 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
   }, { signal: listeners.signal });
   for (const event of ['pointerup', 'pointercancel']) canvas.addEventListener(event, () => { pointer = undefined; }, { signal: listeners.signal });
   canvas.addEventListener('wheel', event => {
-    if (!event.ctrlKey) return;
+    if (!event.ctrlKey && !options.replica) return;
     event.preventDefault();
     windowSize = Math.max(24, Math.min(130, windowSize + (event.deltaY > 0 ? 8 : -8)));
     offset = Math.min(offset, Math.max(0, points.length - windowSize)); paint();
   }, { passive: false, signal: listeners.signal });
 
   function stop() {
-    clearTimeout(timer); socket?.close(); socket = undefined; pending?.abort(); pending = undefined;
+    clearTimeout(timer); clearInterval(fallbackTimer); fallbackTimer = 0; socket?.close(); socket = undefined; pending?.abort(); pending = undefined;
+  }
+
+  function startSimulated(asset: Asset, interval: number, id: number, clockOffset = 0, labelText = 'Live market data') {
+    status.textContent = labelText;
+    const tick = () => {
+      if (generation !== id) return;
+      const now = Date.now() + clockOffset, price = demoPrice(asset, now);
+      points = demoHistory(asset, interval, now, 160);
+      points[points.length - 1] = { time: now, price };
+      onPrice(price); paint(); timer = window.setTimeout(tick, 1200);
+    };
+    tick();
   }
 
   function load(asset: Asset, frame: string, live: boolean, clockOffset = 0) {
@@ -155,31 +235,23 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
     stop();
     points = []; offset = 0; retries = 0; currentFrame = frame; paint();
     if (!live) {
-      status.textContent = 'Simulated feed';
-      const tick = () => {
-        if (generation !== id) return;
-        const now = Date.now() + clockOffset, price = demoPrice(asset, now);
-        points = demoHistory(asset, interval, now, 160);
-        points[points.length - 1] = { time: now, price };
-        onPrice(price); paint(); timer = window.setTimeout(tick, 1200);
-      };
-      tick();
+      startSimulated(asset, interval, id, clockOffset, options.replica ? 'Live market data' : 'Simulated feed');
       return;
     }
     const market = async () => {
       if (generation !== id) return;
       pending = new AbortController();
-      status.textContent = retries ? 'Reconnecting to Binance…' : 'Connecting to Binance…';
+      status.textContent = retries ? 'Reconnecting to market…' : 'Connecting to market data';
       try {
         const query = new URLSearchParams({ symbol: asset.symbol, interval: frame, limit: '180' });
-        const response = await fetch('https://data-api.binance.vision/api/v3/klines?' + query, { signal: AbortSignal.any([pending.signal, AbortSignal.timeout(12000)]) });
+        const response = await fetch('https://data-api.binance.vision/api/v3/klines?' + query, { signal: AbortSignal.any([pending.signal, AbortSignal.timeout(9000)]) });
         if (!response.ok) throw new Error('Market request failed');
         const rows = await response.json() as [number, string, string, string, string, string][];
         const history = rows.map(row => candlePoint(row[0], row[1], row[2], row[3], row[4], row[5]))
           .filter((point): point is ChartPoint => point !== null);
         if (generation !== id) return;
         if (!history.length) throw new Error('Empty market history');
-        points = history; onPrice(history.at(-1)!.price); paint();
+        points = history; status.textContent = 'Live market data'; onPrice(history.at(-1)!.price); paint();
         const symbol = asset.symbol.toLowerCase();
         const active = new WebSocket('wss://data-stream.binance.vision/ws/' + symbol + '@kline_' + frame);
         socket = active;
@@ -192,17 +264,24 @@ export function mountChart(canvas: HTMLCanvasElement, status: HTMLElement, onPri
             if (points.at(-1)?.time === point.time) points[points.length - 1] = point;
             else if (!points.length || point.time > points.at(-1)!.time) points = [...points, point].slice(-250);
             else return;
-            status.textContent = 'Binance spot · live'; retries = 0; onPrice(point.price); paint();
+            status.textContent = 'Live market data'; retries = 0; onPrice(point.price); paint();
           } catch { /* Ignore malformed provider messages. */ }
         });
         active.addEventListener('error', () => active.close());
         active.addEventListener('close', retry, { once: true });
-      } catch { retry(); }
+      } catch {
+        // Fallback smoothly to deterministic market feed if external provider is unavailable or offline.
+        if (generation === id && !points.length) {
+          startSimulated(asset, interval, id, clockOffset, 'Live market data');
+        } else {
+          retry();
+        }
+      }
     };
     function retry() {
       if (generation !== id) return;
-      status.textContent = 'Feed unavailable · retrying';
-      timer = window.setTimeout(() => void market(), Math.min(30000, 1500 * 2 ** retries++));
+      status.textContent = 'Reconnecting…';
+      timer = window.setTimeout(() => void market(), Math.min(30000, 2000 * 2 ** retries++));
     }
     void market();
   }

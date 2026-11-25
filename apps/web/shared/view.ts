@@ -1,8 +1,30 @@
 export type Row = { id: string; [key: string]: unknown };
 export type Page = { rows: Row[]; cursor: string | null };
 export type Wallet = { available: number; held: number };
-export type Profile = { uid: string; name: string; email: string; tradeEnabled: boolean; withdrawalEnabled: boolean; notificationReadAt?: number };
-export type Home = { profile: Profile; wallet: Wallet; active: Row[]; serverTime: number };
+export type Profile = {
+  uid: string;
+  name: string;
+  email: string;
+  tradeEnabled: boolean;
+  withdrawalEnabled: boolean;
+  notificationReadAt?: number;
+  notificationClearAt?: number;
+  vipLevel?: string;
+  reputationScore?: number;
+  frozen?: boolean;
+  freezeAmount?: boolean;
+  frozenAmount?: number;
+  currency?: string;
+  hasWithdrawalPin?: boolean;
+  savedBank?: Record<string, string> | null;
+};
+export type Home = {
+  profile: Profile;
+  wallet: Wallet;
+  active: Row[];
+  depositSettings?: { usdtBscAddress?: string; upiId?: string };
+  serverTime: number;
+};
 
 const decimal = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const credits = (value: unknown) => decimal.format(Number(value ?? 0) / 100);
