@@ -87,8 +87,8 @@ async function actor(request: CallableRequest, staffRequired: boolean): Promise<
   if (!staff?.active || !Array.isArray(staff.roles) || !staff.roles.some((role: string) => ['admin', 'finance', 'support'].includes(role))) {
     fail('permission-denied', 'This account has no staff access.');
   }
-  if (!local && (!request.auth.token.email_verified || request.auth.token.firebase?.sign_in_second_factor !== 'totp')) {
-    fail('permission-denied', 'Verify your email and sign in with an authenticator to access staff tools.');
+  if (!local && !request.auth.token.email_verified) {
+    fail('permission-denied', 'Verify your email to access staff tools.');
   }
   return { uid, staff: staff.roles, allClients: staff.allClients === true };
 }
