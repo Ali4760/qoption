@@ -209,7 +209,8 @@ async function placeTrade(user: Actor, data: Data) {
     ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' trade');
     return { id: trade.id, entry, dueAt, duration, profitPercent: pct, stake, symbol: asset.symbol, direction, createdAt: now };
   });
-  await bumpSync({ tradesAt: Date.now() }, [user.uid]);
+  const ts = Date.now();
+  await bumpSync({ tradesAt: ts, clientsAt: ts }, [user.uid]);
   return result;
 }
 
@@ -350,7 +351,8 @@ async function askFunding(user: Actor, data: Data) {
     tx.create(ref, docData);
     return { id: ref.id };
   });
-  await bumpSync({ fundingAt: Date.now() }, [user.uid]);
+  const ts = Date.now();
+  await bumpSync({ fundingAt: ts, ...(kind === 'withdrawal' ? { clientsAt: ts } : {}) }, [user.uid]);
   return result;
 }
 

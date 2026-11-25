@@ -392,7 +392,7 @@ function startActiveTradeCountdown(trade: { id: string; symbol: string; directio
       try {
         const [updated, tradesPage] = await Promise.all([
           api.call<Home>('home'),
-          api.call<Page>('list', { list: 'trades', limit: 20 }),
+          api.call<Page>('list', { list: 'trades', limit: 100 }),
         ]);
         setHome(updated);
         clientState.tradeRows = tradesPage.rows;
@@ -606,7 +606,7 @@ function startRealtimeSync() {
       if (clientsChanged) invalidateAdminCache(['clients', 'client', 'overview']);
       if (auditChanged) invalidateAdminCache(['audit']);
 
-      if (fundingChanged && route !== 'overview' && route !== 'withdrawals' && route !== 'deposits') {
+      if (fundingChanged && route !== 'overview') {
         void refreshAdminBadges();
       }
       const shouldRefreshCurrent =
@@ -616,7 +616,7 @@ function startRealtimeSync() {
         ((route === 'withdrawals' || route === 'deposits') && fundingChanged) ||
         (route === 'audit' && auditChanged);
 
-      if (shouldRefreshCurrent && !document.hidden) {
+      if (shouldRefreshCurrent) {
         void silentRefreshCurrentRoute();
       }
     });
@@ -1070,7 +1070,7 @@ async function silentRefreshCurrentRoute(button?: HTMLElement) {
     silentRefreshActive = false;
     if (silentRefreshQueued) {
       silentRefreshQueued = false;
-      if (admin && access && !document.hidden) void silentRefreshCurrentRoute();
+      if (admin && access) void silentRefreshCurrentRoute();
     }
   }
 }
@@ -1082,6 +1082,8 @@ async function silentRefreshUserView() {
     const updated = await api.call<Home>('home');
     if (run !== version) return;
     setHome(updated);
+    clientLoaded.funding = false;
+    clientLoaded.trades = false;
     void hydrateClientSidebarData();
     void refreshClientTabData(clientState.activeTab, true);
   } catch { /* Retain current user view on transient error. */ }
@@ -2200,7 +2202,7 @@ document.addEventListener('visibilitychange', () => {
   if (admin) {
     const cached = adminCache.get(adminCacheKey(route));
     if (!cached || cached.dirty) void silentRefreshCurrentRoute();
-  } else {
+  } else if (!syncInitialized || (clientState.activeTrade && clientState.activeTrade.dueAt <= Date.now() + clockOffset)) {
     void silentRefreshUserView();
   }
 });
