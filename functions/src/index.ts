@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldPath, getFirestore, type DocumentData, type Query, type Transaction } from 'firebase-admin/firestore';
@@ -46,6 +46,21 @@ function cents(value: unknown, signed = false): number {
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
+function generateInviteCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(8);
+  return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+}
+async function bumpSync(fields: Record<string, unknown>, userUids: string[] = []) {
+  const now = Date.now();
+  const tasks: Promise<unknown>[] = [
+    db.collection('meta').doc('liveSync').set(fields, { merge: true }),
+  ];
+  for (const uid of new Set(userUids.filter(Boolean))) {
+    tasks.push(db.collection('userSync').doc(uid).set({ updatedAt: now, ...fields }, { merge: true }));
+  }
+  await Promise.allSettled(tasks);
+}
 
 const profile = (uid: string) => db.collection('profiles').doc(uid);
 const wallet = (uid: string) => db.collection('wallets').doc(uid);
@@ -67,11 +82,13 @@ function changeFunds(tx: Transaction, uid: string, current: DocumentData | undef
 }
 
 async function upsertProfile(uid: string, email: string, nameParam?: string, inviteCodeParam?: string) {
+  let created = false;
   await db.runTransaction(async tx => {
     const [user, balance] = await Promise.all([tx.get(profile(uid)), tx.get(wallet(uid))]);
     const trimmedName = nameParam && nameParam.trim() ? nameParam.trim().slice(0, 60) : undefined;
     const trimmedInvite = inviteCodeParam && inviteCodeParam.trim() ? inviteCodeParam.trim().slice(0, 40) : undefined;
     if (!user.exists) {
+      created = true;
       const name = trimmedName || email.split('@')[0]?.slice(0, 40) || 'Trader';
       tx.create(profile(uid), {
         uid,
@@ -100,6 +117,7 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
       ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Practice trading credit');
     }
   });
+  if (created) await bumpSync({ clientsAt: Date.now() }, [uid]);
 }
 
 async function actor(request: CallableRequest, staffRequired: boolean): Promise<Actor> {
@@ -163,7 +181,7 @@ async function placeTrade(user: Actor, data: Data) {
   const now = Date.now(), dueAt = now + 1000 * duration;
   const entry = demoPrice(asset, now);
   const trade = db.collection('trades').doc();
-  return mutate(user, data, 'trade.place', [asset.symbol, duration, direction, stake], async tx => {
+  const result = await mutate(user, data, 'trade.place', [asset.symbol, duration, direction, stake], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
@@ -172,10 +190,13 @@ async function placeTrade(user: Actor, data: Data) {
     ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' simulated trade');
     return { id: trade.id, entry, dueAt };
   });
+  await bumpSync({ tradesAt: Date.now() }, [user.uid]);
+  return result;
 }
 
-async function settle(id: string, now: number) {
+async function settle(id: string, now: number): Promise<string | null> {
   const ref = db.collection('trades').doc(id);
+  let settledUid: string | null = null;
   await db.runTransaction(async tx => {
     const trade = (await tx.get(ref)).data();
     if (!trade || trade.status !== 'open' || trade.dueAt > now) return;
@@ -192,14 +213,23 @@ async function settle(id: string, now: number) {
     changeFunds(tx, trade.uid, balance, payout, -trade.stake);
     tx.update(ref, { status: 'settled', outcome, exit, payout, pnl: payout - trade.stake, settledAt: now });
     ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' simulated trade');
+    settledUid = String(trade.uid || '');
   });
+  return settledUid;
 }
 async function settleDue(uid?: string) {
   const now = Date.now();
   let query: Query = db.collection('trades').where('status', '==', 'open').where('dueAt', '<=', now);
   if (uid) query = query.where('uid', '==', uid);
   const due = await query.orderBy('dueAt').limit(uid ? 12 : 50).get();
-  for (const trade of due.docs) await settle(trade.id, now);
+  const settledUids: string[] = [];
+  for (const trade of due.docs) {
+    const target = await settle(trade.id, now);
+    if (target) settledUids.push(target);
+  }
+  if (settledUids.length) {
+    await bumpSync({ tradesAt: Date.now(), clientsAt: Date.now() }, settledUids);
+  }
 }
 
 async function askFunding(user: Actor, data: Data) {
@@ -208,7 +238,7 @@ async function askFunding(user: Actor, data: Data) {
   const amount = cents(data.amount);
   const now = Date.now();
   const ref = db.collection('funding').doc();
-  return mutate(user, data, 'funding.request', [kind, amount], async tx => {
+  const result = await mutate(user, data, 'funding.request', [kind, amount], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
     if (!person.exists) fail('failed-precondition', 'Open the workspace before submitting a request.');
     if (person.get('frozen')) fail('failed-precondition', 'Account is frozen. Contact support.');
@@ -221,6 +251,8 @@ async function askFunding(user: Actor, data: Data) {
     tx.create(ref, { uid: user.uid, kind, amount, createdAt: now, status: 'pending', method: 'Simulated transfer' });
     return { id: ref.id };
   });
+  await bumpSync({ fundingAt: Date.now() }, [user.uid]);
+  return result;
 }
 
 async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
@@ -234,11 +266,13 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
     : state === 'approved' ? (rawReason ? rawReason.slice(0, 240) : 'Approved')
     : text(data.reason, 240, 3);
   const now = Date.now();
-  return mutate(user, data, 'funding.decide', [id, state, reason], async tx => {
+  let targetUid = '';
+  const result = await mutate(user, data, 'funding.decide', [id, state, reason], async tx => {
     if (asStaff) await checkStaff(tx, user, 'finance');
     const ref = db.collection('funding').doc(id);
     const request = (await tx.get(ref)).data();
     if (!request) fail('not-found', 'Funding request was not found.');
+    targetUid = String(request.uid || '');
     if (asStaff) checkScope(user, (await tx.get(profile(request.uid))).data());
     else if (request.uid !== user.uid || request.kind !== 'withdrawal') fail('permission-denied', 'Only the owner may cancel a pending withdrawal.');
     if (request.status !== 'pending') fail('failed-precondition', 'This request has already been decided.');
@@ -248,9 +282,14 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
     changeFunds(tx, request.uid, balance, availableDelta, heldDelta);
     tx.update(ref, { status: state, reason, decidedAt: now });
     ledger(tx, request.uid, 'funding_decision_' + id, request.kind + ' ' + state, availableDelta, heldDelta, now, reason);
-    if (asStaff) audit(tx, user, request.uid, request.kind + ' ' + state, reason, now);
+    const kindLabel = request.kind === 'deposit' ? 'Deposit' : 'Withdrawal';
+    const amtText = '₹' + (Number(request.amount || 0) / 100).toFixed(2);
+    if (asStaff) audit(tx, user, request.uid, kindLabel + ' ' + state, `${kindLabel} ${state} (${amtText}): ${reason}`, now);
     return { id, status: state };
   });
+  const ts = Date.now();
+  await bumpSync({ fundingAt: ts, clientsAt: ts, ...(asStaff ? { auditAt: ts } : {}) }, [targetUid || user.uid]);
+  return result;
 }
 
 async function page(query: Query, data: Data, scope: unknown, field = 'createdAt', ascending = false) {
@@ -286,7 +325,7 @@ async function message(user: Actor, data: Data, asStaff: boolean) {
   if (asStaff) requireRole(user, 'support');
   const target = asStaff ? identifier(data.uid) : user.uid;
   const content = text(data.message, 1000);
-  return mutate(user, data, 'message.send', [target, content, asStaff], async tx => {
+  const result = await mutate(user, data, 'message.send', [target, content, asStaff], async tx => {
     if (asStaff) {
       await checkStaff(tx, user, 'support');
       checkScope(user, (await tx.get(profile(target))).data());
@@ -295,6 +334,8 @@ async function message(user: Actor, data: Data, asStaff: boolean) {
     tx.create(ref, { uid: target, sender: asStaff ? 'Support' : 'You', message: content, createdAt: Date.now() });
     return { id: ref.id };
   });
+  await bumpSync({ messagesAt: Date.now() }, asStaff ? [target] : []);
+  return result;
 }
 async function updateProfile(user: Actor, data: Data) {
   const name = text(data.name, 50, 2);
@@ -327,7 +368,11 @@ async function adminOverview(user: Actor) {
     user.staff.includes('admin') ? trades.orderBy('createdAt', 'desc').limit(4).get() : null,
     user.staff.includes('finance') ? funding.where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(4).get() : null,
   ]);
-  const invitationCode = (staffProfile.data()?.invitation_code as string | undefined) || 'QOPTION2026';
+  let invitationCode = (staffProfile.data()?.invitation_code as string | undefined) || '';
+  if (!invitationCode) {
+    invitationCode = generateInviteCode();
+    await profile(user.uid).set({ invitation_code: invitationCode }, { merge: true });
+  }
   return {
     clients: clientCount.data().count,
     trades: tradeCount.data().count,
@@ -337,6 +382,26 @@ async function adminOverview(user: Actor) {
     recent: recent?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? [],
     pending: pending?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? []
   };
+}
+async function adminBadges(user: Actor) {
+  const funding = await staffQuery(user, 'funding');
+  const [deposits, withdrawals] = await Promise.all([
+    funding.where('kind', '==', 'deposit').where('status', '==', 'pending').count().get(),
+    funding.where('kind', '==', 'withdrawal').where('status', '==', 'pending').count().get(),
+  ]);
+  return { deposits: deposits.data().count, withdrawals: withdrawals.data().count };
+}
+async function adminInviteRefresh(user: Actor, data: Data) {
+  const code = generateInviteCode();
+  const result = await mutate(user, data, 'admin.invite.refresh', [code], async tx => {
+    const role = user.staff[0] || 'admin';
+    await checkStaff(tx, user, role);
+    tx.set(profile(user.uid), { invitation_code: code }, { merge: true });
+    audit(tx, user, user.uid, 'Invitation code refreshed', 'Invitation code randomized to ' + code, Date.now());
+    return { code };
+  });
+  await bumpSync({ auditAt: Date.now() });
+  return result;
 }
 async function clientView(user: Actor, data: Data) {
   const uid = identifier(data.uid);
@@ -352,28 +417,40 @@ async function adminUpdate(user: Actor, data: Data, adjusting: boolean) {
   const uid = identifier(data.uid);
   const delta = adjusting ? cents(data.amount, true) : 0;
   const rawReason = typeof data.reason === 'string' ? data.reason.trim() : '';
-  const reason = adjusting
+  const ledgerReason = adjusting
     ? (rawReason ? rawReason.slice(0, 240) : (delta > 0 ? 'Funds added by admin' : 'Funds deducted by admin'))
     : text(data.reason, 240, 3);
   const tradeEnabled = data.tradeEnabled === true, withdrawalEnabled = data.withdrawalEnabled === true;
   if (!adjusting && (typeof data.tradeEnabled !== 'boolean' || typeof data.withdrawalEnabled !== 'boolean')) fail('invalid-argument', 'Invalid restriction.');
-  return mutate(user, data, adjusting ? 'admin.adjust' : 'admin.restrict', [uid, reason, delta, tradeEnabled, withdrawalEnabled], async tx => {
+  const result = await mutate(user, data, adjusting ? 'admin.adjust' : 'admin.restrict', [uid, ledgerReason, delta, tradeEnabled, withdrawalEnabled], async tx => {
     await checkStaff(tx, user, role);
-    checkScope(user, (await tx.get(profile(uid))).data());
+    const current = (await tx.get(profile(uid))).data();
+    checkScope(user, current);
     const now = Date.now();
+    let auditReason = ledgerReason;
     if (adjusting) {
       changeFunds(tx, uid, (await tx.get(wallet(uid))).data(), delta, 0);
-      ledger(tx, uid, db.collection('ledger').doc().id, 'Staff adjustment', delta, 0, now, reason);
-    } else tx.update(profile(uid), { tradeEnabled, withdrawalEnabled });
-    audit(tx, user, uid, adjusting ? 'Balance adjustment' : 'Restrictions updated', reason, now);
+      ledger(tx, uid, db.collection('ledger').doc().id, 'Staff adjustment', delta, 0, now, ledgerReason);
+      const amtText = '₹' + (Math.abs(delta) / 100).toFixed(2);
+      auditReason = `Balance updated: ${delta > 0 ? '+' : '-'}${amtText}${rawReason ? ' — ' + rawReason.slice(0, 180) : ''}`;
+    } else {
+      const diffs: string[] = [];
+      if (Boolean(current?.tradeEnabled) !== tradeEnabled) diffs.push(`Trading: ${tradeEnabled ? 'enabled' : 'disabled'}`);
+      if (Boolean(current?.withdrawalEnabled) !== withdrawalEnabled) diffs.push(`Withdrawals: ${withdrawalEnabled ? 'enabled' : 'disabled'}`);
+      auditReason = (diffs.length ? diffs.join(', ') + ' — ' : '') + ledgerReason;
+      tx.update(profile(uid), { tradeEnabled, withdrawalEnabled });
+    }
+    audit(tx, user, uid, adjusting ? 'Balance updated' : 'Restrictions updated', auditReason, now);
     return { uid };
   });
+  const ts = Date.now();
+  await bumpSync({ clientsAt: ts, auditAt: ts }, [uid]);
+  return result;
 }
 
 async function adminClientUpdate(user: Actor, data: Data) {
   requireRole(user, 'admin');
   const uid = identifier(data.uid);
-  const reason = 'Admin client update';
   const updates: Record<string, unknown> = {};
   if (typeof data.name === 'string' && data.name.trim()) {
     updates.name = data.name.trim().slice(0, 60);
@@ -407,13 +484,48 @@ async function adminClientUpdate(user: Actor, data: Data) {
     await getAuth().updateUser(uid, { password: newPassword });
   }
 
-  return mutate(user, data, 'admin.client.update', [uid, updates, Boolean(newPassword)], async tx => {
+  const result = await mutate(user, data, 'admin.client.update', [uid, updates, Boolean(newPassword)], async tx => {
     await checkStaff(tx, user, 'admin');
-    checkScope(user, (await tx.get(profile(uid))).data());
+    const current = (await tx.get(profile(uid))).data();
+    checkScope(user, current);
+    const changes: string[] = [];
+    if (updates.name !== undefined && updates.name !== current?.name) {
+      changes.push(`Name updated: ${String(current?.name || '—')} → ${String(updates.name)}`);
+    }
+    if (newPassword) changes.push('Login password changed');
+    if (updates.withdrawalPinHash !== undefined) changes.push('Withdrawal PIN changed');
+    if (updates.vipLevel !== undefined && updates.vipLevel !== current?.vipLevel) {
+      changes.push(`VIP Level updated: ${String(current?.vipLevel || 'VIP1')} → ${String(updates.vipLevel)}`);
+    }
+    if (updates.reputationScore !== undefined && Number(updates.reputationScore) !== Number(current?.reputationScore ?? 100)) {
+      changes.push(`Reputation score updated: ${Number(current?.reputationScore ?? 100)} → ${Number(updates.reputationScore)}`);
+    }
+    if (updates.tradeEnabled !== undefined && Boolean(updates.tradeEnabled) !== Boolean(current?.tradeEnabled)) {
+      changes.push(`Trading ${updates.tradeEnabled ? 'enabled' : 'disabled'}`);
+    }
+    if (updates.withdrawalEnabled !== undefined && Boolean(updates.withdrawalEnabled) !== Boolean(current?.withdrawalEnabled)) {
+      changes.push(`Withdrawals ${updates.withdrawalEnabled ? 'enabled' : 'disabled'}`);
+    }
+    if (updates.frozen !== undefined && Boolean(updates.frozen) !== Boolean(current?.frozen)) {
+      changes.push(`Account ${updates.frozen ? 'frozen' : 'unfrozen'}`);
+    }
+    if (updates.freezeAmount !== undefined && Boolean(updates.freezeAmount) !== Boolean(current?.freezeAmount)) {
+      changes.push(`Amount freeze ${updates.freezeAmount ? 'enabled' : 'disabled'}`);
+    }
+    if (updates.currency !== undefined && updates.currency !== (current?.currency || 'INR')) {
+      changes.push(`Currency updated: ${String(current?.currency || 'INR')} → ${String(updates.currency)}`);
+    }
+    if (updates.tradeMode !== undefined && String(updates.tradeMode) !== String(current?.tradeMode || 'auto').toLowerCase()) {
+      changes.push(`Trade mode updated: ${String(current?.tradeMode || 'auto').toUpperCase()} → ${String(updates.tradeMode).toUpperCase()}`);
+    }
     if (Object.keys(updates).length) tx.update(profile(uid), updates);
-    audit(tx, user, uid, 'Profile updated', reason, Date.now());
+    const auditReason = changes.length ? changes.join(', ') : 'Profile saved (no field changes)';
+    audit(tx, user, uid, 'Profile updated', auditReason, Date.now());
     return { uid };
   });
+  const ts = Date.now();
+  await bumpSync({ clientsAt: ts, auditAt: ts }, [uid]);
+  return result;
 }
 
 async function adminClientCreate(user: Actor, data: Data) {
@@ -449,8 +561,9 @@ async function adminClientCreate(user: Actor, data: Data) {
     });
     tx.create(wallet(created.uid), { available: openingAmount, held: 0 });
     ledger(tx, created.uid, 'opening_' + created.uid, 'Opening balance', openingAmount, 0, now, 'Practice trading credit');
-    audit(tx, user, created.uid, 'Client created', 'Created by admin', now);
+    audit(tx, user, created.uid, 'Client created', `Created client account: ${name} (${email})`, now);
   });
+  await bumpSync({ clientsAt: now, auditAt: now });
   return { uid: created.uid };
 }
 
@@ -475,15 +588,17 @@ async function adminNotificationPush(user: Actor, data: Data) {
   const title = text(data.title, 100, 1);
   const message = text(data.message, 1000, 1);
   const role = user.staff.includes('admin') ? 'admin' : 'support';
-  return mutate(user, data, 'admin.notifications.push', [uid, title, message], async tx => {
+  const result = await mutate(user, data, 'admin.notifications.push', [uid, title, message], async tx => {
     await checkStaff(tx, user, role);
     checkScope(user, (await tx.get(profile(uid))).data());
     const ref = db.collection('notifications').doc();
     const now = Date.now();
     tx.create(ref, { uid, title, message, createdAt: now, createdBy: user.uid });
-    audit(tx, user, uid, 'Notification pushed', title, now);
+    audit(tx, user, uid, 'Notification pushed', `Notification pushed: ${title}`, now);
     return { id: ref.id };
   });
+  await bumpSync({ auditAt: Date.now() }, [uid]);
+  return result;
 }
 
 async function adminNotificationDelete(user: Actor, data: Data) {
@@ -492,17 +607,20 @@ async function adminNotificationDelete(user: Actor, data: Data) {
   }
   const id = identifier(data.id);
   const role = user.staff.includes('admin') ? 'admin' : 'support';
-  return mutate(user, data, 'admin.notifications.delete', [id], async tx => {
+  let targetUid = '';
+  const result = await mutate(user, data, 'admin.notifications.delete', [id], async tx => {
     await checkStaff(tx, user, role);
     const ref = db.collection('notifications').doc(id);
     const doc = await tx.get(ref);
     if (!doc.exists) fail('not-found', 'Notification not found.');
-    const targetUid = String(doc.get('uid') || '');
+    targetUid = String(doc.get('uid') || '');
     checkScope(user, (await tx.get(profile(targetUid))).data());
     tx.delete(ref);
-    audit(tx, user, targetUid, 'Notification removed', String(doc.get('title') || id), Date.now());
+    audit(tx, user, targetUid, 'Notification removed', `Notification removed: ${String(doc.get('title') || id)}`, Date.now());
     return { id, deleted: true };
   });
+  await bumpSync({ auditAt: Date.now() }, [targetUid]);
+  return result;
 }
 
 async function enrichWithProfiles(rows: Data[], db: ReturnType<typeof getFirestore>) {
@@ -523,11 +641,62 @@ async function enrichWithProfiles(rows: Data[], db: ReturnType<typeof getFiresto
   });
 }
 
+async function enrichAuditRows(rows: Data[]) {
+  if (!rows.length) return rows;
+  const clientUids = [...new Set(rows.map(r => String(r.uid || '')).filter(Boolean))];
+  const actorUids = [...new Set(rows.map(r => String(r.actor || '')).filter(Boolean))];
+  const allUids = [...new Set([...clientUids, ...actorUids])];
+  const profileMap = new Map<string, { name: string; email: string }>();
+  for (let i = 0; i < allUids.length; i += 10) {
+    const chunk = allUids.slice(i, i + 10);
+    const docs = await Promise.all(chunk.map(uid => db.collection('profiles').doc(uid).get()));
+    for (const doc of docs) {
+      if (doc.exists) profileMap.set(doc.id, { name: String(doc.get('name') || ''), email: String(doc.get('email') || '') });
+    }
+  }
+  const missingActors = actorUids.filter(uid => !profileMap.get(uid)?.name);
+  const actorNameMap = new Map<string, string>();
+  for (const uid of actorUids) {
+    const p = profileMap.get(uid);
+    if (p?.name) actorNameMap.set(uid, p.name);
+  }
+  if (missingActors.length) {
+    const staffDocs = await Promise.all(missingActors.map(uid => db.collection('staff').doc(uid).get()));
+    const stillMissing: string[] = [];
+    for (const doc of staffDocs) {
+      const staffName = String(doc.get('name') || doc.get('displayName') || '').trim();
+      if (staffName) actorNameMap.set(doc.id, staffName);
+      else stillMissing.push(doc.id);
+    }
+    if (stillMissing.length) {
+      try {
+        const authRes = await getAuth().getUsers(stillMissing.slice(0, 100).map(uid => ({ uid })));
+        for (const u of authRes.users) {
+          const resolved = u.displayName || (u.email ? u.email.split('@')[0] : '') || '';
+          if (resolved) actorNameMap.set(u.uid, resolved);
+        }
+      } catch { /* Fallback cleanly if Auth batch lookup unavailable. */ }
+    }
+  }
+  return rows.map(r => {
+    const uid = String(r.uid || '');
+    const actorId = String(r.actor || '');
+    const client = profileMap.get(uid);
+    const actorName = actorNameMap.get(actorId) || profileMap.get(actorId)?.email || '';
+    return {
+      ...r,
+      clientName: client?.name || '',
+      clientEmail: client?.email || '',
+      actorName,
+    };
+  });
+}
+
 export const workspace = onCall({ region, enforceAppCheck: local ? false : requireAppCheck, maxInstances: 8 }, async request => {
   const data = record(request.data);
   const op = text(data.op, 64);
   const user = await actor(request, op.startsWith('admin.'));
-  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete'].includes(op);
+  const staffWrite = ['admin.funding.decide', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete', 'admin.invite.refresh'].includes(op);
   if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
     fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
   }
@@ -565,6 +734,8 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     }
     case 'admin.access': return { roles: user.staff };
     case 'admin.dashboard': return adminOverview(user);
+    case 'admin.badges': return adminBadges(user);
+    case 'admin.invite.refresh': return adminInviteRefresh(user, data);
     case 'admin.clients': {
       const rawSearch = text(data.search ?? '', 80, 0).trim();
       const search = rawSearch.replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
@@ -608,9 +779,12 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       result.rows = await enrichWithProfiles(result.rows, db) as typeof result.rows;
       return result;
     }
-    case 'admin.audit':
+    case 'admin.audit': {
       requireRole(user, 'admin');
-      return page(await staffQuery(user, 'audit'), data, [op, user.uid]);
+      const result = await page(await staffQuery(user, 'audit'), data, [op, user.uid]);
+      result.rows = await enrichAuditRows(result.rows) as typeof result.rows;
+      return result;
+    }
     case 'admin.client': return clientView(user, data);
     case 'admin.messages': {
       requireRole(user, 'support');

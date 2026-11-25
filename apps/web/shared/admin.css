@@ -303,39 +303,89 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 15px 24px;
-  padding: 18px 20px;
-  border-color: var(--admin-green-border);
-  background: linear-gradient(110deg, #0f2924 0%, #0b1522 68%);
+  gap: 16px 24px;
+  padding: 20px 24px;
+  border-color: var(--admin-line);
+  background: linear-gradient(135deg, #0f1b2c 0%, #0b1522 72%);
   margin-bottom: 0;
 }
 
 .admin-shell .admin-invite h2 {
-  margin-bottom: 4px;
-  font-size: .97rem;
-  color: #c7f0e4;
+  margin-bottom: 5px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #edf5ff;
 }
 
 .admin-shell .admin-invite p {
   color: var(--admin-muted);
-  font-size: .84rem;
+  font-size: .86rem;
+  margin: 0;
 }
 
-.admin-shell .admin-invite-code {
+.admin-shell .admin-invite-right {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
   min-width: 0;
 }
 
-.admin-shell .admin-invite-code code {
+.admin-shell .admin-invite-right code {
   max-width: 100%;
-  color: var(--admin-green);
-  font-size: .97rem;
-  letter-spacing: .07em;
+  color: var(--admin-orange);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: .12em;
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+}
+
+.admin-shell .admin-invite-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-shell .invite-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid #24384e;
+  background: #0d1826;
+  color: #c5d9ec;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+
+.admin-shell .invite-icon-btn:hover {
+  background: #17293f;
+  border-color: #3d5f82;
+  color: #fff;
+}
+
+.admin-shell .refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.admin-shell .refresh-btn svg {
+  display: block;
+  transition: transform .2s ease;
+}
+
+.admin-shell .refresh-btn.is-spinning svg {
+  animation: admin-spin .65s linear infinite;
+}
+
+@keyframes admin-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ─── Overview bottom panels ─────────────────────────────── */
@@ -733,8 +783,8 @@
 
   .admin-shell .admin-invite { padding: 16px; }
 
-  .admin-shell .admin-invite-code {
-    justify-content: space-between;
+  .admin-shell .admin-invite-right {
+    align-items: flex-start;
     width: 100%;
   }
 

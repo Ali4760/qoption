@@ -29,6 +29,16 @@ let clientSection = 'activity';
 let visibleRows = new Map<string, Row>();
 type List = { page: number; next: string | null; cursors: (string | null)[]; search: string; status: string };
 const lists = new Map<string, List>();
+type CachedAdminView = { key: string; route: string; data: unknown; rows: Row[]; next: string | null; ts: number; dirty: boolean };
+const adminCache = new Map<string, CachedAdminView>();
+const CACHE_TTL = 60_000;
+let syncUnsub: (() => void) | undefined;
+let syncInitialized = false;
+let prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0 };
+let prevUserUpdatedAt = 0;
+let silentRefreshQueued = false;
+let silentRefreshActive = false;
+
 const role = (name: string) => roles.includes(name);
 const nav = () => admin ? adminNav.filter(item => !item[3] || role(item[3])) : userNav;
 const part = (i: number) => {
@@ -39,6 +49,14 @@ const content = () => root.querySelector<HTMLElement>('#content')!;
 const panel = () => root.querySelector<HTMLDialogElement>('#details')!;
 const routeName = () => nav().find(item => item[0] === route)?.[2] || 'Client details';
 const stop = () => { chart?.destroy(); chart = undefined; clearInterval(refreshTimer); };
+const stopSync = () => {
+  syncUnsub?.();
+  syncUnsub = undefined;
+  syncInitialized = false;
+  prevAdminSync = { tradesAt: 0, fundingAt: 0, clientsAt: 0, auditAt: 0 };
+  prevUserUpdatedAt = 0;
+  adminCache.clear();
+};
 const go = (target: string) => { if (location.hash === '#' + target) void render(); else location.hash = target; };
 const cents = (value: unknown) => Math.round(Number(value) * 100);
 function list(): List {
@@ -51,6 +69,26 @@ function list(): List {
 }
 function resetList() { Object.assign(list(), { page: 0, next: null, cursors: [null] }); }
 const navigation = () => pager(list().page, list().next);
+function adminCacheKey(targetRoute = route) {
+  const current = list();
+  if (targetRoute === 'overview') return 'overview';
+  if (targetRoute === 'clients') return 'clients:' + current.search + ':' + current.page;
+  if (targetRoute === 'withdrawals' || targetRoute === 'deposits') return targetRoute + ':' + current.status + ':' + current.page;
+  if (targetRoute === 'client') return 'client:' + clientId() + ':' + clientSection + ':' + current.page;
+  return targetRoute + ':' + current.page;
+}
+function invalidateAdminCache(prefixes: string[]) {
+  for (const [key, entry] of adminCache) {
+    if (prefixes.some(prefix => key === prefix || key.startsWith(prefix + ':'))) {
+      entry.dirty = true;
+    }
+  }
+}
+function applyCachedRows(rows: Row[], next: string | null, clientRow?: Row) {
+  visibleRows = new Map(rows.map(row => [row.id, row]));
+  if (clientRow) visibleRows.set('@client', clientRow);
+  list().next = next;
+}
 async function getPage(run: number, op: string, args: Record<string, unknown> = {}) {
   const current = list();
   const page = await api.call<Page>(op, { ...args, cursor: current.cursors[current.page] });
@@ -163,7 +201,7 @@ function setAdminBadges(deposits: unknown, withdrawals: unknown) {
 async function refreshAdminBadges() {
   if (!admin || !access) return;
   try {
-    const data = await api.call<{ deposits?: number; withdrawals?: number }>('admin.dashboard');
+    const data = await api.call<{ deposits?: number; withdrawals?: number }>('admin.badges');
     setAdminBadges(data.deposits, data.withdrawals);
   } catch { /* Non-fatal badge refresh. */ }
 }
@@ -193,12 +231,70 @@ function shell() {
     '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title" id="workspace-location">' +
     (admin ? 'Admin dashboard' : 'Trade') + '</span>' + topActions + '</header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
 }
+function startRealtimeSync() {
+  if (!api || !person) return;
+  syncUnsub?.();
+  syncInitialized = false;
+  if (admin) {
+    syncUnsub = api.watchAdminSync(data => {
+      const next = {
+        tradesAt: Number(data.tradesAt || 0),
+        fundingAt: Number(data.fundingAt || 0),
+        clientsAt: Number(data.clientsAt || 0),
+        auditAt: Number(data.auditAt || 0),
+      };
+      if (!syncInitialized) {
+        prevAdminSync = next;
+        syncInitialized = true;
+        return;
+      }
+      const tradesChanged = next.tradesAt > prevAdminSync.tradesAt;
+      const fundingChanged = next.fundingAt > prevAdminSync.fundingAt;
+      const clientsChanged = next.clientsAt > prevAdminSync.clientsAt;
+      const auditChanged = next.auditAt > prevAdminSync.auditAt;
+      prevAdminSync = next;
+
+      if (tradesChanged) invalidateAdminCache(['trades', 'overview']);
+      if (fundingChanged) invalidateAdminCache(['withdrawals', 'deposits', 'overview']);
+      if (clientsChanged) invalidateAdminCache(['clients', 'client', 'overview']);
+      if (auditChanged) invalidateAdminCache(['audit']);
+
+      if (fundingChanged && route !== 'overview' && route !== 'withdrawals' && route !== 'deposits') {
+        void refreshAdminBadges();
+      }
+      const shouldRefreshCurrent =
+        (route === 'overview' && (tradesChanged || fundingChanged || clientsChanged)) ||
+        (route === 'trades' && tradesChanged) ||
+        ((route === 'clients' || route === 'client') && clientsChanged) ||
+        ((route === 'withdrawals' || route === 'deposits') && fundingChanged) ||
+        (route === 'audit' && auditChanged);
+
+      if (shouldRefreshCurrent && !document.hidden) {
+        void silentRefreshCurrentRoute();
+      }
+    });
+  } else {
+    const uid = person.uid;
+    syncUnsub = api.watchUserSync(uid, data => {
+      const nextAt = Number(data.updatedAt || 0);
+      if (!syncInitialized) {
+        prevUserUpdatedAt = nextAt;
+        syncInitialized = true;
+        return;
+      }
+      if (nextAt <= prevUserUpdatedAt) return;
+      prevUserUpdatedAt = nextAt;
+      void silentRefreshUserView();
+    });
+  }
+}
+
 async function start() {
   try {
     api = await connect(admin ? 'admin' : 'user');
     onAuthStateChanged(api.auth, async user => {
       const latest = ++authVersion;
-      version++; stop(); access = false; guestMarket = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
+      version++; stop(); stopSync(); access = false; guestMarket = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
       person = user; resolver = undefined; secret = undefined;
       if (!user) { showAuth(); return; }
       root.innerHTML = '<p class="boot">Opening workspace…</p>';
@@ -212,7 +308,7 @@ async function start() {
           if (latest !== authVersion) return;
           setHome(data);
         }
-        access = true; shell(); if (admin) void refreshAdminBadges(); await render();
+        access = true; shell(); startRealtimeSync(); if (admin) void refreshAdminBadges(); await render();
       } catch (error) { if (latest === authVersion) showAuth(errorMessage(error)); }
     });
   } catch (error) { root.innerHTML = '<main class="content">' + title('Workspace unavailable', errorMessage(error)) + '</main>'; }
@@ -277,196 +373,443 @@ async function renderUser(run: number) {
       'Request a reset link for your account email.') + '</div>';
 }
 
-async function renderClient(run: number) {
-  const uid = clientId(), current = list(), thread = clientSection === 'messages';
-  const data = await api.call<{ profile: Profile; wallet: Wallet | null; activity: Page }>('admin.client', { uid, cursor: thread ? null : current.cursors[current.page] });
-  const page = thread ? await api.call<Page>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
-  if (run !== version) return '';
-  remember(page, current); visibleRows.set('@client', { ...data.profile, id: uid });
+type ClientBundle = { data: { profile: Profile; wallet: Wallet | null; activity: Page }; page: Page };
+type OverviewData = Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string };
+type ListBundle = { rows: Row[]; next: string | null };
+
+function clientSummaryHtml(data: ClientBundle['data']) {
   const balance = data.wallet ? '<div class="admin-client-balances"><article class="metric"><small>Available credits</small><strong>' +
     credits(data.wallet.available) + '</strong></article><article class="metric"><small>Credits on hold</small><strong>' +
     credits(data.wallet.held) + '</strong></article></div>' : '';
   const identity = data.wallet ? '<section class="panel admin-client-identity"><header class="panel-heading"><h2>Account permissions</h2></header>' +
     '<div class="panel-body"><dl><dt>Trading</dt><dd>' + state(data.profile.tradeEnabled ? 'enabled' : 'paused') +
     '</dd><dt>Withdrawals</dt><dd>' + state(data.profile.withdrawalEnabled ? 'enabled' : 'paused') + '</dd></dl></div></section>' : '';
-  return title(data.profile.name, data.profile.email) +
+  return balance + identity;
+}
+function clientActivityBodyHtml(uid: string, data: ClientBundle['data'], page: Page) {
+  const thread = clientSection === 'messages';
+  return '<div class="filters" role="group" aria-label="Client activity view">' +
+    '<button type="button" class="button secondary compact" data-action="client-tab" data-id="activity" aria-pressed="' + String(!thread) + '">Activity</button>' +
+    (role('support') ? '<button type="button" class="button secondary compact" data-action="client-tab" data-id="messages" aria-pressed="' +
+      String(thread) + '">Messages</button>' : '') + '</div>' +
+    (thread ? messages(page.rows, uid) : data.wallet ? ledgerRows(page.rows) : table(['Sender', 'Message', 'Date'],
+      page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) + navigation();
+}
+function buildClientDetailHtml(bundle: ClientBundle) {
+  const uid = clientId(), { data, page } = bundle;
+  return '<div id="client-detail-head">' + title(data.profile.name, data.profile.email) + '</div>' +
     '<div class="button-row admin-client-actions"><a class="button secondary compact" href="#clients">Back to clients</a>' +
     (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') +
     (role('finance') ? actionButton('adjustment', uid, 'Adjust credits') : '') + '</div>' +
-    '<div class="admin-client-summary">' + balance + identity + '</div>' +
-    section('Client activity', '<div class="filters" role="group" aria-label="Client activity view">' +
-      '<button type="button" class="button secondary compact" data-action="client-tab" data-id="activity" aria-pressed="' + String(!thread) + '">Activity</button>' +
-      (role('support') ? '<button type="button" class="button secondary compact" data-action="client-tab" data-id="messages" aria-pressed="' +
-        String(thread) + '">Messages</button>' : '') + '</div>' +
-      (thread ? messages(page.rows, uid) : data.wallet ? ledgerRows(page.rows) : table(['Sender', 'Message', 'Date'],
-        page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) + navigation());
+    '<div class="admin-client-summary" id="client-summary-panel">' + clientSummaryHtml(data) + '</div>' +
+    '<section class="panel" id="client-activity-panel"><header class="panel-heading"><h2>Client activity</h2></header>' +
+    '<div id="client-activity-body">' + clientActivityBodyHtml(uid, data, page) + '</div></section>';
 }
-async function renderAdmin(run: number) {
-  if (route === 'overview') {
-    const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string }>('admin.dashboard');
+
+function overviewPendingBody(values: OverviewData) {
+  return table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
+    esc(label(row.kind)), credits(row.amount), esc(String(row.clientName || recordReference(row.uid))), actionButton('review-funding', row.id, 'Review'),
+  ]), 'No requests awaiting review');
+}
+function overviewRecentBody(values: OverviewData) {
+  return table(['Market', 'Direction', 'Status', ''], values.recent.map(row => [
+    pair(row.symbol), state(row.direction), state(row.outcome || row.status), actionButton('trade-detail', row.id, 'Details'),
+  ]), 'No recent trades');
+}
+function buildOverviewHtml(values: OverviewData) {
+  const cards = [['clients', 'Clients in your scope'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
+  const inviteCode = values.invitationCode || '';
+  const inviteCard = '<section class="panel admin-invite"><div class="admin-invite-copy"><h2>Client Invitation Code</h2>' +
+    '<p>Share this code with new clients to register under your management.</p></div><div class="admin-invite-right"><code id="invite-code">' + esc(inviteCode) + '</code>' +
+    '<div class="admin-invite-actions">' +
+    '<button type="button" class="invite-icon-btn refresh-btn" data-action="refresh-invite" title="Generate new invitation code" aria-label="Generate new invitation code">' + adminActionIcons.refresh + '</button>' +
+    '<button type="button" class="invite-icon-btn" data-action="copy-invite" data-code="' + esc(inviteCode) + '" title="Copy invitation code" aria-label="Copy invitation code">' + adminActionIcons.copy + '</button>' +
+    '</div></div></section>';
+  return title('Admin dashboard', 'Monitor accounts, orders, and requests in your staff scope.') + '<div class="admin-overview-grid">' +
+    cards.map(([key, name]) => {
+      const allowed = nav().some(item => item[0] === key);
+      const tag = allowed ? 'a' : 'article';
+      return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="#' + key + '"' : '') + '><small>' + name + '</small><strong data-metric="' + key + '">' +
+        Number(values[key] || 0).toLocaleString() + '</strong><span class="admin-metric-foot">' + (allowed ? 'View ' + key + ' ↗' : 'Current total') +
+        '</span></' + tag + '>';
+    }).join('') + '</div>' + inviteCard + '<div class="overview-panels dashboard-lower">' +
+    (role('finance') ? '<section class="panel" id="overview-pending-panel"><header class="panel-heading"><h2>Pending funding</h2></header><div class="panel-table-host">' + overviewPendingBody(values) + '</div></section>' : '') +
+    (role('admin') ? '<section class="panel" id="overview-recent-panel"><header class="panel-heading"><h2>Recent trades</h2></header><div class="panel-table-host">' + overviewRecentBody(values) + '</div></section>' : '') + '</div>';
+}
+
+function clientRowCells(row: Row, index: number, startId: number) {
+  const isFrozen = row.frozen === true;
+  const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
+  const uid = String(row.id || '');
+  const shortUid = uid.slice(0, 8).toUpperCase();
+  const displayId = '#' + (startId - index);
+  const vipRaw = String(row.vipLevel || 'VIP1');
+  const vipUnverified = vipRaw.toLowerCase() === 'unverified';
+  const vipLabel = vipUnverified ? 'UNVERIFIED' : vipRaw.toUpperCase().replace(/^VIP(\d)$/i, 'VIP $1');
+  const rep = Number(row.reputationScore ?? 100);
+  const balance = Number(row.balance ?? 0);
+  const mode = String(row.tradeMode || 'auto').toLowerCase();
+  return [
+    esc(displayId),
+    '<strong class="client-name">' + esc(String(row.name || '')) + '</strong><div class="client-email">' + esc(String(row.email || '')) + '</div><div class="client-uid">UID: ' + esc(shortUid) + '</div>',
+    '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vipLabel) + '</span><div class="rep-score">Rep: ' + rep + '</div>',
+    '₹' + credits(balance),
+    isFrozen ? '<span class="status-frozen">FROZEN</span>' : isActive ? '<span class="status-active">ACTIVE</span>' : '<span class="status-inactive">SUSPENDED</span>',
+    '<div class="trade-mode-group">' +
+      '<button type="button" class="trade-pill trade-auto' + (mode === 'auto' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="auto">Auto</button>' +
+      '<button type="button" class="trade-pill trade-win' + (mode === 'win' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="win">Win</button>' +
+      '<button type="button" class="trade-pill trade-loss' + (mode === 'loss' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="loss">Loss</button>' +
+    '</div>',
+    '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">' + adminActionIcons.report + '</button>' +
+    '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">' + adminActionIcons.wallet + '</button>' +
+    '<button type="button" class="icon-action-btn" data-action="notify-client" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Push notification">' + adminActionIcons.bell + '</button>' +
+    '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">' + adminActionIcons.edit + '</button>',
+  ];
+}
+function clientRowHtml(row: Row, index: number, startId: number) {
+  const isFrozen = row.frozen === true;
+  const uid = String(row.id || '');
+  const c = clientRowCells(row, index, startId);
+  return '<tr data-row-id="' + esc(uid) + '"' + (isFrozen ? ' style="opacity:0.75"' : '') + '>' +
+    '<td class="client-id-cell">' + c[0] + '</td>' +
+    '<td class="client-detail-cell">' + c[1] + '</td>' +
+    '<td class="vip-rep-cell">' + c[2] + '</td>' +
+    '<td class="balance-cell">' + c[3] + '</td>' +
+    '<td class="client-status-cell">' + c[4] + '</td>' +
+    '<td class="trade-mode-cell">' + c[5] + '</td>' +
+    '<td class="actions-cell">' + c[6] + '</td>' +
+  '</tr>';
+}
+function buildClientsHtml(rows: Row[]) {
+  const search = list().search, startId = 1000 + rows.length;
+  return '<div class="clients-page-header"><h1 class="clients-title">My Clients</h1>' +
+    '<div class="clients-controls">' +
+    '<form class="clients-search-form" data-form="search">' +
+    '<input name="search" class="clients-search-input" maxlength="50" value="' + esc(search) + '" placeholder="Search UID, Name or Email">' +
+    '<button type="button" class="button secondary compact icon-btn refresh-btn" data-action="reload" title="Refresh" aria-label="Refresh clients">' + adminActionIcons.refresh + '</button>' +
+    '</form>' +
+    '<button type="button" class="button new-client-btn" data-action="new-client">＋ New</button>' +
+    '</div></div>' +
+    '<section class="panel">' +
+    '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
+    '<thead><tr><th>ID</th><th>CLIENT DETAILS</th><th>VIP / REP</th><th>BALANCE</th><th>STATUS</th><th>TRADE MODE</th><th>ACTIONS</th></tr></thead>' +
+    '<tbody id="clients-tbody">' + rows.map((row, i) => clientRowHtml(row, i, startId)).join('') + '</tbody></table></div>' +
+    '<div id="clients-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>No clients found</h3><p>Records will appear here as activity comes in.</p></div>' +
+    '<div id="table-pager">' + navigation() + '</div></section>';
+}
+
+function fundingRowCells(row: Row, index: number, total: number, isWithdrawal: boolean) {
+  const fundId = '#' + ((isWithdrawal ? 2000 : 3000) + total - index);
+  const clientName = String(row.clientName || recordReference(row.uid));
+  const clientEmail = String(row.clientEmail || '');
+  const statusVal = String(row.status || 'pending');
+  return [
+    esc(fundId),
+    '<strong class="client-name">' + esc(clientName) + '</strong>' + (clientEmail ? '<div class="client-email">' + esc(clientEmail) + '</div>' : ''),
+    '₹' + credits(row.amount),
+    dateTime(row.createdAt),
+    state(statusVal),
+    '<button type="button" class="icon-action-btn" data-action="funding-detail" data-id="' + esc(row.id) + '" title="View details">' + adminActionIcons.eye + '</button>' +
+    (statusVal === 'pending' ? '<button type="button" class="icon-action-btn approve-btn" data-action="approve-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Approve">✓</button>' : '') +
+    (statusVal === 'pending' ? '<button type="button" class="icon-action-btn reject-btn" data-action="reject-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Reject">✗</button>' : ''),
+  ];
+}
+function fundingRowHtml(row: Row, index: number, total: number, isWithdrawal: boolean) {
+  const c = fundingRowCells(row, index, total, isWithdrawal);
+  return '<tr data-row-id="' + esc(row.id) + '">' +
+    '<td class="client-id-cell">' + c[0] + '</td>' +
+    '<td class="client-detail-cell">' + c[1] + '</td>' +
+    '<td class="funding-amount-cell">' + c[2] + '</td>' +
+    '<td class="funding-date-cell">' + c[3] + '</td>' +
+    '<td class="funding-status-cell">' + c[4] + '</td>' +
+    '<td class="funding-actions-cell">' + c[5] + '</td>' +
+  '</tr>';
+}
+function buildFundingHtml(rows: Row[], isWithdrawal: boolean) {
+  const status = list().status;
+  const heading = isWithdrawal ? 'Withdrawal History' : 'Deposit History';
+  const emptyTitle = isWithdrawal ? 'No withdrawal requests' : 'No deposit requests';
+  const refreshBtn = '<button type="button" class="button secondary compact refresh-btn" data-action="reload">' + adminActionIcons.refresh + '<span>Refresh</span></button>';
+  return '<div class="page-header-row"><h1 class="page-main-title">' + heading + '</h1>' + refreshBtn + '</div>' +
+    '<section class="panel">' +
+    '<div class="filters">' +
+    '<label>Status<select id="funding-status">' + ['pending', 'approved', 'rejected', 'cancelled', 'all'].map(value =>
+      '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
+    '</div>' +
+    '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
+    '<thead><tr><th>ID</th><th>CLIENT</th><th>AMOUNT</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>' +
+    '<tbody id="funding-tbody">' + rows.map((row, i) => fundingRowHtml(row, i, rows.length, isWithdrawal)).join('') + '</tbody></table></div>' +
+    '<div id="funding-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>' + emptyTitle + '</h3><p>Records will appear here as activity comes in.</p></div>' +
+    '<div id="table-pager">' + navigation() + '</div></section>';
+}
+
+function tradeRowCells(row: Row, index: number, total: number) {
+  const tradeId = '#' + (4000 + total - index);
+  const clientName = String(row.clientName || recordReference(row.uid));
+  const dueAt = Number(row.dueAt);
+  const createdAt = Number(row.createdAt);
+  const secs = dueAt && createdAt ? Math.max(1, Math.round((dueAt - createdAt) / 1000)) : Number(row.duration || 60);
+  const timeframeText = secs >= 60 && secs % 60 === 0 ? (secs / 60) + ' min' : secs + ' sec';
+  const outcome = String(row.outcome || row.status || 'open').toLowerCase();
+  const badge = outcome === 'win' ? '<span class="trade-status-win">WIN</span>'
+    : outcome === 'loss' ? '<span class="trade-status-loss">LOSS</span>'
+    : outcome === 'refund' ? '<span class="trade-status-refund">REFUND</span>'
+    : '<span class="trade-status-open">OPEN</span>';
+  return [
+    esc(tradeId),
+    '<strong>' + esc(clientName) + '</strong>',
+    pair(row.symbol),
+    esc(String(row.direction || '').toUpperCase()),
+    '₹' + credits(row.stake),
+    esc(timeframeText),
+    badge,
+  ];
+}
+function tradeRowHtml(row: Row, index: number, total: number) {
+  const c = tradeRowCells(row, index, total);
+  return '<tr data-row-id="' + esc(row.id) + '">' +
+    '<td class="client-id-cell">' + c[0] + '</td>' +
+    '<td>' + c[1] + '</td>' +
+    '<td>' + c[2] + '</td>' +
+    '<td>' + c[3] + '</td>' +
+    '<td>' + c[4] + '</td>' +
+    '<td>' + c[5] + '</td>' +
+    '<td class="trade-status-cell">' + c[6] + '</td>' +
+  '</tr>';
+}
+function buildTradesHtml(rows: Row[]) {
+  return '<div class="page-header-row">' +
+    '<h1 class="page-main-title">Live Trades</h1>' +
+    '<button class="button live-updates-btn" type="button" disabled>⬤ LIVE UPDATES</button>' +
+    '</div>' +
+    '<section class="panel">' +
+    '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
+    '<thead><tr><th>ID</th><th>CLIENT</th><th>ASSET</th><th>DIRECTION</th><th>AMOUNT</th><th>TIMEFRAME</th><th>STATUS</th></tr></thead>' +
+    '<tbody id="trades-tbody">' + rows.map((row, i) => tradeRowHtml(row, i, rows.length)).join('') + '</tbody></table></div>' +
+    '<div id="trades-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>No trades yet</h3><p>Records will appear here as activity comes in.</p></div>' +
+    '<div id="table-pager">' + navigation() + '</div></section>';
+}
+
+function auditRowCells(row: Row) {
+  const uid = String(row.uid || '');
+  const shortUid = uid.slice(0, 8).toUpperCase();
+  const clientName = String(row.clientName || '');
+  const clientCell = clientName
+    ? '<strong class="client-name">' + esc(clientName) + '</strong><div class="client-uid">UID: ' + esc(shortUid) + '</div>'
+    : '<div class="client-uid">UID: ' + esc(recordReference(uid)) + '</div>';
+  const actorName = String(row.actorName || recordReference(row.actor) || 'Staff');
+  return [
+    esc(row.event),
+    clientCell,
+    '<span class="audit-actor">' + esc(actorName) + '</span>',
+    '<span class="audit-reason">' + esc(row.reason || '—') + '</span>',
+    dateTime(row.createdAt),
+  ];
+}
+function auditRowHtml(row: Row) {
+  const c = auditRowCells(row);
+  return '<tr data-row-id="' + esc(row.id) + '">' + c.map(cell => '<td>' + cell + '</td>').join('') + '</tr>';
+}
+function buildAuditHtml(rows: Row[]) {
+  return title('Audit log', 'Staff actions recorded by the server.') +
+    '<section class="panel"><header class="panel-heading"><h2>Audit events</h2></header>' +
+    '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
+    '<thead><tr><th>Event</th><th>Client</th><th>Admin</th><th>Reason</th><th>Date</th></tr></thead>' +
+    '<tbody id="audit-tbody">' + rows.map(auditRowHtml).join('') + '</tbody></table></div>' +
+    '<div id="audit-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>No audit events</h3><p>Records will appear here as activity comes in.</p></div>' +
+    '<div id="table-pager">' + navigation() + '</div></section>';
+}
+
+function buildAdminHtml(targetRoute: string, payload: unknown): string {
+  if (targetRoute === 'overview') return buildOverviewHtml(payload as OverviewData);
+  if (targetRoute === 'client') return buildClientDetailHtml(payload as ClientBundle);
+  const { rows } = payload as ListBundle;
+  if (targetRoute === 'clients') return buildClientsHtml(rows);
+  if (targetRoute === 'deposits' || targetRoute === 'withdrawals') return buildFundingHtml(rows, targetRoute === 'withdrawals');
+  if (targetRoute === 'trades') return buildTradesHtml(rows);
+  return buildAuditHtml(rows);
+}
+
+async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ payload: unknown; rows: Row[]; next: string | null; clientRow?: Row }> {
+  if (targetRoute === 'overview') {
+    const values = await api.call<OverviewData>('admin.dashboard');
     setAdminBadges(values.deposits, values.withdrawals);
-    if (run === version) visibleRows = new Map([...values.recent, ...values.pending].map(row => [row.id, row]));
-    const cards = [['clients', 'Clients in your scope'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
-    const inviteCode = values.invitationCode || 'QOPTION2026';
-    const inviteCard = '<section class="panel admin-invite"><div><h2>Client invitation code</h2>' +
-      '<p>New clients can save this reference when they register.</p></div><div class="admin-invite-code"><code>' + esc(inviteCode) + '</code>' +
-      '<button type="button" class="button secondary compact" data-action="copy-invite" data-code="' + esc(inviteCode) +
-      '">Copy code</button></div></section>';
-    return title('Admin dashboard', 'Monitor accounts, orders, and requests in your staff scope.', 'Virtual funds') + '<div class="admin-overview-grid">' +
-      cards.map(([key, name]) => {
-        const allowed = nav().some(item => item[0] === key);
-        const tag = allowed ? 'a' : 'article';
-        return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="#' + key + '"' : '') + '><small>' + name + '</small><strong>' +
-          Number(values[key] || 0).toLocaleString() + '</strong><span class="admin-metric-foot">' + (allowed ? 'View ' + key + ' ↗' : 'Current total') +
-          '</span></' + tag + '>';
-      }).join('') + '</div>' + inviteCard + '<div class="overview-panels dashboard-lower">' +
-      (role('finance') ? section('Pending funding', table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
-        esc(label(row.kind)), credits(row.amount), esc(recordReference(row.uid)), actionButton('review-funding', row.id, 'Review'),
-      ]), 'No requests awaiting review')) : '') +
-      (role('admin') ? section('Recent trades', table(['Market', 'Direction', 'Status', ''], values.recent.map(row => [
-        pair(row.symbol), state(row.direction), state(row.outcome || row.status), actionButton('trade-detail', row.id, 'Details'),
-      ]), 'No recent trades')) : '') + '</div>';
+    return { payload: values, rows: [...values.recent, ...values.pending], next: null };
   }
-  if (route === 'client') return renderClient(run);
-  if (route === 'clients') {
-    const search = list().search, rows = await getPage(run, 'admin.clients', { search });
-    // ID counter starting from 1000 descending by index
-    const startId = 1000 + rows.length;
-    return '<div class="clients-page-header"><h1 class="clients-title">My Clients</h1>' +
-      '<div class="clients-controls">' +
-      '<form class="clients-search-form" data-form="search">' +
-      '<input name="search" class="clients-search-input" maxlength="50" value="' + esc(search) + '" placeholder="Search UID, Name or Email">' +
-      '<button type="button" class="button secondary compact icon-btn" data-action="reload" title="Refresh">↻</button>' +
-      '</form>' +
-      '<button type="button" class="button new-client-btn" data-action="new-client">＋ New</button>' +
-      '</div></div>' +
-      '<section class="panel">' +
-      '<div class="table-wrap"><table>' +
-      '<thead><tr><th>ID</th><th>CLIENT DETAILS</th><th>VIP / REP</th><th>BALANCE</th><th>STATUS</th><th>TRADE MODE</th><th>ACTIONS</th></tr></thead>' +
-      '<tbody>' + rows.map((row, i) => {
-        const isFrozen = row.frozen === true;
-        const isActive = !isFrozen && row.tradeEnabled && row.withdrawalEnabled;
-        const uid = String(row.id || '');
-        const shortUid = uid.slice(0, 8).toUpperCase();
-        const displayId = '#' + (startId - i);
-        const vipRaw = String(row.vipLevel || 'VIP1');
-        const vipUnverified = vipRaw.toLowerCase() === 'unverified';
-        const vipLabel = vipUnverified ? 'UNVERIFIED' : vipRaw.toUpperCase().replace(/^VIP(\d)$/i, 'VIP $1');
-        const rep = Number(row.reputationScore ?? 100);
-        const balance = Number(row.balance ?? 0);
-        const mode = String(row.tradeMode || 'auto').toLowerCase();
-        return '<tr' + (isFrozen ? ' style="opacity:0.75"' : '') + '>' +
-          '<td class="client-id-cell">' + esc(displayId) + '</td>' +
-          '<td class="client-detail-cell">' +
-            '<strong class="client-name">' + esc(String(row.name || '')) + '</strong>' +
-            '<div class="client-email">' + esc(String(row.email || '')) + '</div>' +
-            '<div class="client-uid">UID: ' + esc(shortUid) + '</div>' +
-          '</td>' +
-          '<td class="vip-rep-cell">' +
-            '<span class="vip-badge' + (vipUnverified ? ' unverified' : '') + '">' + esc(vipLabel) + '</span>' +
-            '<div class="rep-score">Rep: ' + rep + '</div>' +
-          '</td>' +
-          '<td class="balance-cell">₹' + credits(balance) + '</td>' +
-          '<td>' + (isFrozen ? '<span class="status-frozen">FROZEN</span>' : isActive ? '<span class="status-active">ACTIVE</span>' : '<span class="status-inactive">SUSPENDED</span>') + '</td>' +
-          '<td class="trade-mode-cell"><div class="trade-mode-group">' +
-            '<button type="button" class="trade-pill trade-auto' + (mode === 'auto' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="auto">Auto</button>' +
-            '<button type="button" class="trade-pill trade-win' + (mode === 'win' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="win">Win</button>' +
-            '<button type="button" class="trade-pill trade-loss' + (mode === 'loss' ? ' active' : '') + '" data-action="trade-mode" data-id="' + esc(uid) + '" data-mode="loss">Loss</button>' +
-          '</div></td>' +
-          '<td class="actions-cell">' +
-            '<button type="button" class="icon-action-btn" data-action="client" data-id="' + esc(uid) + '" title="View details">' + adminActionIcons.report + '</button>' +
-            '<button type="button" class="icon-action-btn" data-action="balance-modal" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Manage balance">' + adminActionIcons.wallet + '</button>' +
-            '<button type="button" class="icon-action-btn" data-action="notify-client" data-id="' + esc(uid) + '" data-name="' + esc(String(row.name || '')) + '" title="Push notification">' + adminActionIcons.bell + '</button>' +
-            '<button type="button" class="icon-action-btn" data-action="edit-client" data-id="' + esc(uid) + '" title="Edit client">' + adminActionIcons.edit + '</button>' +
-          '</td>' +
-        '</tr>';
-      }).join('') +
-      '</tbody></table></div>' +
-      (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No clients found</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
-      navigation() + '</section>';
+  if (targetRoute === 'client') {
+    const uid = clientId(), thread = clientSection === 'messages';
+    const data = await api.call<{ profile: Profile; wallet: Wallet | null; activity: Page }>('admin.client', { uid, cursor: thread ? null : current.cursors[current.page] });
+    const page = thread ? await api.call<Page>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
+    return { payload: { data, page }, rows: page.rows, next: page.cursor, clientRow: { ...data.profile, id: uid } };
   }
-  const refresh = '<button class="button secondary compact" data-action="reload">↻ Refresh</button>';
-  if (route === 'deposits' || route === 'withdrawals') {
-    const isWithdrawal = route === 'withdrawals';
-    const status = list().status;
-    const rows = await getPage(run, 'admin.funding', { kind: isWithdrawal ? 'withdrawal' : 'deposit', status });
-    if (isWithdrawal) {
-      return '<div class="page-header-row"><h1 class="page-main-title">Withdrawal History</h1>' + refresh + '</div>' +
-        '<section class="panel">' +
-        '<div class="filters">' +
-        '<label>Status<select id="funding-status">' + ['pending', 'approved', 'rejected', 'cancelled', 'all'].map(value =>
-          '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
-        '</div>' +
-        '<div class="table-wrap"><table>' +
-        '<thead><tr><th>ID</th><th>CLIENT</th><th>AMOUNT</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>' +
-        '<tbody>' + rows.map((row, i) => {
-          const fundId = '#' + (2000 + rows.length - i);
-          const clientName = String(row.clientName || recordReference(row.uid));
-          const clientEmail = String(row.clientEmail || '');
-          const statusVal = String(row.status || 'pending');
-          return '<tr>' +
-            '<td class="client-id-cell">' + esc(fundId) + '</td>' +
-            '<td class="client-detail-cell">' +
-              '<strong class="client-name">' + esc(clientName) + '</strong>' +
-              (clientEmail ? '<div class="client-email">' + esc(clientEmail) + '</div>' : '') +
-            '</td>' +
-            '<td>₹' + credits(row.amount) + '</td>' +
-            '<td>' + dateTime(row.createdAt) + '</td>' +
-            '<td>' + state(statusVal) + '</td>' +
-            '<td class="funding-actions-cell">' +
-              '<button type="button" class="icon-action-btn" data-action="funding-detail" data-id="' + esc(row.id) + '" title="View details">👁</button>' +
-              (statusVal === 'pending' ? '<button type="button" class="icon-action-btn approve-btn" data-action="approve-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Approve">✓</button>' : '') +
-              (statusVal === 'pending' ? '<button type="button" class="icon-action-btn reject-btn" data-action="reject-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Reject">✗</button>' : '') +
-            '</td>' +
-          '</tr>';
-        }).join('') +
-        '</tbody></table></div>' +
-        (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No withdrawal requests</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
-        navigation() + '</section>';
+  let pageRes: Page;
+  if (targetRoute === 'clients') pageRes = await api.call<Page>('admin.clients', { search: current.search, cursor: current.cursors[current.page] });
+  else if (targetRoute === 'deposits' || targetRoute === 'withdrawals') pageRes = await api.call<Page>('admin.funding', { kind: targetRoute === 'withdrawals' ? 'withdrawal' : 'deposit', status: current.status, cursor: current.cursors[current.page] });
+  else if (targetRoute === 'trades') pageRes = await api.call<Page>('admin.trades', { cursor: current.cursors[current.page] });
+  else pageRes = await api.call<Page>('admin.audit', { cursor: current.cursors[current.page] });
+  return { payload: { rows: pageRes.rows, next: pageRes.cursor }, rows: pageRes.rows, next: pageRes.cursor };
+}
+
+function patchTableRows(
+  tbodyId: string,
+  blankId: string,
+  rows: Row[],
+  getCells: (row: Row, index: number) => string[],
+  buildRow: (row: Row, index: number) => string,
+  patchRowExtras?: (tr: HTMLTableRowElement, row: Row) => void
+) {
+  const tbody = root.querySelector<HTMLTableSectionElement>('#' + tbodyId);
+  const blank = root.querySelector<HTMLElement>('#' + blankId);
+  const wrap = tbody?.closest<HTMLElement>('.table-wrap');
+  const pagerHost = root.querySelector<HTMLElement>('#table-pager');
+  if (!tbody) return false;
+  if (wrap) wrap.hidden = rows.length === 0;
+  if (blank) blank.hidden = rows.length > 0;
+  if (pagerHost) {
+    const nextPager = navigation();
+    if (pagerHost.innerHTML !== nextPager) pagerHost.innerHTML = nextPager;
+  }
+  const existing = Array.from(tbody.children) as HTMLTableRowElement[];
+  const sameOrder = existing.length === rows.length && existing.every((tr, i) => tr.dataset.rowId === String(rows[i].id || ''));
+  if (sameOrder) {
+    for (let i = 0; i < rows.length; i++) {
+      const tr = existing[i];
+      patchRowExtras?.(tr, rows[i]);
+      const cells = getCells(rows[i], i);
+      for (let c = 0; c < cells.length; c++) {
+        const td = tr.children[c] as HTMLElement | undefined;
+        if (td && td.innerHTML !== cells[c]) td.innerHTML = cells[c];
+      }
     }
-    return title(routeName(), 'Review simulated funding requests.') + section(routeName() + ' queue',
-      '<div class="filters"><label>Status<select id="funding-status">' + ['pending', 'approved', 'rejected', 'cancelled', 'all'].map(value =>
-        '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
-      refresh + '</div>' + fundingRows(rows, true) + navigation());
+  } else {
+    tbody.innerHTML = rows.map((r, i) => buildRow(r, i)).join('');
   }
-  if (route === 'trades') {
-    const rows = await getPage(run, 'admin.trades');
-    return '<div class="page-header-row">' +
-      '<h1 class="page-main-title">Live Trades</h1>' +
-      '<button class="button live-updates-btn" type="button" disabled>⬤ LIVE UPDATES</button>' +
-      '</div>' +
-      '<section class="panel">' +
-      '<div class="table-wrap"><table>' +
-      '<thead><tr><th>ID</th><th>CLIENT</th><th>ASSET</th><th>DIRECTION</th><th>AMOUNT</th><th>TIMEFRAME</th><th>STATUS</th></tr></thead>' +
-      '<tbody>' + rows.map((row, i) => {
-        const tradeId = '#' + (4000 + rows.length - i);
-        const clientName = String(row.clientName || recordReference(row.uid));
-        const dueAt = Number(row.dueAt);
-        const createdAt = Number(row.createdAt);
-        const secs = dueAt && createdAt ? Math.max(1, Math.round((dueAt - createdAt) / 1000)) : Number(row.duration || 60);
-        const timeframeText = secs >= 60 && secs % 60 === 0 ? (secs / 60) + ' min' : secs + ' sec';
-        const outcome = String(row.outcome || row.status || 'open').toLowerCase();
-        const badge = outcome === 'win' ? '<span class="trade-status-win">WIN</span>'
-          : outcome === 'loss' ? '<span class="trade-status-loss">LOSS</span>'
-          : outcome === 'refund' ? '<span class="trade-status-refund">REFUND</span>'
-          : '<span class="trade-status-open">OPEN</span>';
-        return '<tr>' +
-          '<td class="client-id-cell">' + esc(tradeId) + '</td>' +
-          '<td><strong>' + esc(clientName) + '</strong></td>' +
-          '<td>' + pair(row.symbol) + '</td>' +
-          '<td>' + esc(String(row.direction || '').toUpperCase()) + '</td>' +
-          '<td>₹' + credits(row.stake) + '</td>' +
-          '<td>' + esc(timeframeText) + '</td>' +
-          '<td>' + badge + '</td>' +
-        '</tr>';
-      }).join('') +
-      '</tbody></table></div>' +
-      (rows.length === 0 ? '<div class="blank"><div class="blank-icon">◇</div><h3>No trades yet</h3><p>Records will appear here as activity comes in.</p></div>' : '') +
-      navigation() + '</section>';
+  return true;
+}
+
+function patchAdminDom(targetRoute: string, payload: unknown): boolean {
+  if (targetRoute === 'overview') {
+    const values = payload as OverviewData;
+    setAdminBadges(values.deposits, values.withdrawals);
+    for (const key of ['clients', 'trades', 'deposits', 'withdrawals']) {
+      const el = root.querySelector<HTMLElement>('[data-metric="' + key + '"]');
+      if (!el) return false;
+      const formatted = Number(values[key] || 0).toLocaleString();
+      if (el.textContent !== formatted) el.textContent = formatted;
+    }
+    const inviteCode = values.invitationCode || '';
+    const codeEl = root.querySelector<HTMLElement>('#invite-code');
+    if (codeEl && codeEl.textContent !== inviteCode) codeEl.textContent = inviteCode;
+    const copyBtn = root.querySelector<HTMLElement>('[data-action="copy-invite"]');
+    if (copyBtn) copyBtn.dataset.code = inviteCode;
+    const pendingHost = root.querySelector<HTMLElement>('#overview-pending-panel .panel-table-host');
+    if (pendingHost) {
+      const html = overviewPendingBody(values);
+      if (pendingHost.innerHTML !== html) pendingHost.innerHTML = html;
+    }
+    const recentHost = root.querySelector<HTMLElement>('#overview-recent-panel .panel-table-host');
+    if (recentHost) {
+      const html = overviewRecentBody(values);
+      if (recentHost.innerHTML !== html) recentHost.innerHTML = html;
+    }
+    return true;
   }
-  const rows = await getPage(run, 'admin.audit');
-  return title('Audit log', 'Staff actions recorded by the server.') + section('Audit events', table(['Event', 'Client ID', 'Staff ID', 'Reason', 'Date'],
-    rows.map(row => [esc(row.event), esc(recordReference(row.uid)), esc(recordReference(row.actor)), esc(row.reason), dateTime(row.createdAt)]), 'No audit events') + navigation());
+  if (targetRoute === 'client') {
+    const bundle = payload as ClientBundle;
+    const summary = root.querySelector<HTMLElement>('#client-summary-panel');
+    const activityBody = root.querySelector<HTMLElement>('#client-activity-body');
+    if (!summary || !activityBody) return false;
+    const nextSummary = clientSummaryHtml(bundle.data);
+    if (summary.innerHTML !== nextSummary) summary.innerHTML = nextSummary;
+    const nextActivity = clientActivityBodyHtml(clientId(), bundle.data, bundle.page);
+    if (activityBody.innerHTML !== nextActivity) activityBody.innerHTML = nextActivity;
+    return true;
+  }
+  const { rows } = payload as ListBundle;
+  if (targetRoute === 'clients') {
+    const startId = 1000 + rows.length;
+    return patchTableRows(
+      'clients-tbody', 'clients-blank', rows,
+      (row, i) => clientRowCells(row, i, startId),
+      (row, i) => clientRowHtml(row, i, startId),
+      (tr, row) => { tr.style.opacity = row.frozen === true ? '0.75' : ''; }
+    );
+  }
+  if (targetRoute === 'withdrawals' || targetRoute === 'deposits') {
+    const isWithdrawal = targetRoute === 'withdrawals';
+    return patchTableRows(
+      'funding-tbody', 'funding-blank', rows,
+      (row, i) => fundingRowCells(row, i, rows.length, isWithdrawal),
+      (row, i) => fundingRowHtml(row, i, rows.length, isWithdrawal)
+    );
+  }
+  if (targetRoute === 'trades') {
+    return patchTableRows(
+      'trades-tbody', 'trades-blank', rows,
+      (row, i) => tradeRowCells(row, i, rows.length),
+      (row, i) => tradeRowHtml(row, i, rows.length)
+    );
+  }
+  return patchTableRows(
+    'audit-tbody', 'audit-blank', rows,
+    row => auditRowCells(row),
+    row => auditRowHtml(row)
+  );
+}
+
+async function silentRefreshCurrentRoute(button?: HTMLElement) {
+  if (!admin || !access) return;
+  if (silentRefreshActive) { silentRefreshQueued = true; return; }
+  silentRefreshActive = true;
+  const spinStart = Date.now();
+  const spinner = button?.closest<HTMLElement>('.refresh-btn') || button;
+  spinner?.classList.add('is-spinning');
+  const activeRoute = route, activeKey = adminCacheKey(activeRoute), activeVersion = version;
+  try {
+    const result = await fetchAdminPayload(activeRoute, list());
+    adminCache.set(activeKey, { key: activeKey, route: activeRoute, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
+    if (activeVersion === version && adminCacheKey(route) === activeKey) {
+      applyCachedRows(result.rows, result.next, result.clientRow);
+      if (!patchAdminDom(activeRoute, result.payload)) {
+        content().innerHTML = buildAdminHtml(activeRoute, result.payload);
+      }
+    }
+  } catch { /* Retain visible cached view silently on transient network error. */ }
+  finally {
+    if (spinner) {
+      const wait = Math.max(0, 420 - (Date.now() - spinStart));
+      window.setTimeout(() => spinner.classList.remove('is-spinning'), wait);
+    }
+    silentRefreshActive = false;
+    if (silentRefreshQueued) {
+      silentRefreshQueued = false;
+      if (admin && access && !document.hidden) void silentRefreshCurrentRoute();
+    }
+  }
+}
+
+async function silentRefreshUserView() {
+  if (admin || !access) return;
+  const run = version;
+  try {
+    const updated = await api.call<Home>('home');
+    if (run !== version) return;
+    setHome(updated);
+    if (route === 'trade') {
+      const open = root.querySelector('#open-trades');
+      if (open) open.innerHTML = openTrades(updated.active, updated.serverTime);
+      for (const btn of root.querySelectorAll<HTMLButtonElement>('form[data-form="prepare-trade"] .actions button')) {
+        btn.disabled = !updated.profile.tradeEnabled;
+      }
+      return;
+    }
+    if (route === 'wallet' || route === 'history' || route === 'transactions' || route === 'notifications') {
+      const html = await renderUser(run);
+      if (run === version && !panel().open && !content().contains(document.activeElement)) {
+        content().innerHTML = html;
+      }
+    }
+  } catch { /* Retain current user view on transient error. */ }
 }
 
 async function render() {
@@ -474,22 +817,50 @@ async function render() {
   stop();
   const run = ++version, target = part(0) || first;
   route = nav().some(item => item[0] === target) || (admin && target === 'client' && clientId()) ? target : first;
-  visibleRows.clear();
   const locationLabel = root.querySelector('#workspace-location');
   if (locationLabel) locationLabel.textContent = routeName();
   for (const link of root.querySelectorAll<HTMLElement>('[data-nav]')) {
     if (link.dataset.nav === (route === 'client' ? 'clients' : route)) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
+  if (admin) {
+    const key = adminCacheKey(route);
+    const cached = adminCache.get(key);
+    if (cached) {
+      applyCachedRows(cached.rows, cached.next, route === 'client' ? { ...(cached.data as ClientBundle).data.profile, id: clientId() } : undefined);
+      content().innerHTML = buildAdminHtml(route, cached.data);
+      if (cached.dirty || Date.now() - cached.ts > CACHE_TTL) {
+        void silentRefreshCurrentRoute();
+      }
+      return;
+    }
+    visibleRows.clear();
+    const delay = window.setTimeout(() => {
+      if (run === version) content().innerHTML = title(routeName(), 'Loading…') + '<div class="panel empty-space" aria-busy="true"></div>';
+    }, 180);
+    try {
+      const result = await fetchAdminPayload(route, list());
+      if (run !== version) return;
+      window.clearTimeout(delay);
+      adminCache.set(key, { key, route, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
+      applyCachedRows(result.rows, result.next, result.clientRow);
+      content().innerHTML = buildAdminHtml(route, result.payload);
+    } catch (error) {
+      if (run === version) content().innerHTML = title(routeName(), errorMessage(error)) + '<button class="button secondary" data-action="reload">Try again</button>';
+    } finally { clearTimeout(delay); }
+    return;
+  }
+
+  visibleRows.clear();
   const delay = window.setTimeout(() => {
     if (run === version) content().innerHTML = title(routeName(), 'Loading…') + '<div class="panel empty-space" aria-busy="true"></div>';
   }, 180);
   try {
-    const html = await (admin ? renderAdmin(run) : renderUser(run));
+    const html = await renderUser(run);
     if (run !== version) return;
     window.clearTimeout(delay);
     content().innerHTML = html;
-    if (!admin && (route === 'trade' || route === 'assets')) {
+    if (route === 'trade' || route === 'assets') {
       const { mountChart, formatPrice } = await import('./canvas-chart');
       if (run !== version) return;
       const price = root.querySelector('#market-price')!;
@@ -497,16 +868,6 @@ async function render() {
       if (route === 'assets') chart.setMode(liveChartMode);
       chart.load(selected, frame, route === 'assets', clockOffset);
       if (route === 'trade') refreshTimer = window.setInterval(() => void clockTick(run), 1000);
-    } else if (admin && (route === 'overview' || route === 'trades')) {
-      refreshTimer = window.setInterval(async () => {
-        if (document.hidden || refreshing || panel().open || content().contains(document.activeElement)) return;
-        refreshing = true;
-        try {
-          const html = await renderAdmin(run);
-          if (run === version && !panel().open && !content().contains(document.activeElement)) content().innerHTML = html;
-        } catch { /* Retain the current view on a refresh failure. */ }
-        finally { refreshing = false; }
-      }, route === 'trades' ? 3000 : 15000);
     }
   } catch (error) {
     if (run === version) content().innerHTML = title(routeName(), errorMessage(error)) + '<button class="button secondary" data-action="reload">Try again</button>';
@@ -672,14 +1033,37 @@ root.addEventListener('click', async event => {
         break;
       }
       case 'copy-invite': {
-        const code = target.dataset.code || 'QOPTION2026';
+        const code = target.dataset.code || root.querySelector('#invite-code')?.textContent || '';
+        if (!code) break;
         await navigator.clipboard.writeText(code);
         toast('Invitation code ' + code + ' copied to clipboard!');
         break;
       }
+      case 'refresh-invite': {
+        if (target.classList.contains('is-spinning')) break;
+        const spinStart = Date.now();
+        target.classList.add('is-spinning');
+        try {
+          const res = await api.call<{ code: string }>('admin.invite.refresh', { requestId: crypto.randomUUID() });
+          const codeEl = root.querySelector<HTMLElement>('#invite-code');
+          if (codeEl) codeEl.textContent = res.code;
+          const copyBtn = root.querySelector<HTMLElement>('[data-action="copy-invite"]');
+          if (copyBtn) copyBtn.dataset.code = res.code;
+          const cached = adminCache.get('overview');
+          if (cached?.data && typeof cached.data === 'object') {
+            (cached.data as OverviewData).invitationCode = res.code;
+          }
+          invalidateAdminCache(['audit']);
+          toast('New invitation code generated: ' + res.code);
+        } finally {
+          const wait = Math.max(0, 420 - (Date.now() - spinStart));
+          window.setTimeout(() => target.classList.remove('is-spinning'), wait);
+        }
+        break;
+      }
       case 'enroll': await enroll(); break;
       case 'close': panel().close(); break;
-      case 'reload': await render(); break;
+      case 'reload': if (admin) await silentRefreshCurrentRoute(target); else await render(); break;
       case 'asset': { const asset = findAsset(id); if (asset) { selected = asset; updateMarket(); } break; }
       case 'frame': if (chartFrames.includes(id)) { frame = id; updateMarket(); } break;
       case 'chart-mode': {
@@ -699,13 +1083,15 @@ root.addEventListener('click', async event => {
       case 'trade-detail': case 'funding-detail': case 'review-funding': { const row = visibleRows.get(id); if (row) details(action, row); break; }
       case 'approve-funding': {
         const clientName = target.dataset.name || id;
+        const row = visibleRows.get(id);
+        const kindWord = (row?.kind === 'deposit' || route === 'deposits') ? 'Deposit' : 'Withdrawal';
         const box = panel();
-        box.innerHTML = '<h2 id="detail-heading">Approve Withdrawal</h2>' +
-          '<p style="color:#8fa5be;margin-bottom:14px">Approving withdrawal for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
+        box.innerHTML = '<h2 id="detail-heading">Approve ' + kindWord + '</h2>' +
+          '<p style="color:#8fa5be;margin-bottom:14px">Approving ' + kindWord.toLowerCase() + ' for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
           '<form class="stack" data-form="admin.funding.decide">' +
           '<input type="hidden" name="id" value="' + esc(id) + '">' +
           '<input type="hidden" name="status" value="approved">' +
-          '<label>Remark (optional)<input name="reason" maxlength="240" placeholder="Optional remark" value="Withdrawal approved"></label>' +
+          '<label>Remark (optional)<input name="reason" maxlength="240" placeholder="Optional remark" value="' + kindWord + ' approved"></label>' +
           '<div class="button-row"><button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
           '<button class="button approve-submit-btn">✓ Approve</button></div>' +
           formStatus() + '</form>';
@@ -714,13 +1100,15 @@ root.addEventListener('click', async event => {
       }
       case 'reject-funding': {
         const clientName = target.dataset.name || id;
+        const row = visibleRows.get(id);
+        const kindWord = (row?.kind === 'deposit' || route === 'deposits') ? 'Deposit' : 'Withdrawal';
         const box = panel();
-        box.innerHTML = '<h2 id="detail-heading">Reject Withdrawal</h2>' +
-          '<p style="color:#8fa5be;margin-bottom:14px">Rejecting withdrawal for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
+        box.innerHTML = '<h2 id="detail-heading">Reject ' + kindWord + '</h2>' +
+          '<p style="color:#8fa5be;margin-bottom:14px">Rejecting ' + kindWord.toLowerCase() + ' for <strong style="color:#c5d9ec">' + esc(clientName) + '</strong></p>' +
           '<form class="stack" data-form="admin.funding.decide">' +
           '<input type="hidden" name="id" value="' + esc(id) + '">' +
           '<input type="hidden" name="status" value="rejected">' +
-          '<label>Reason for rejection <span style="color:#ff8fa3">*</span><input name="reason" minlength="3" maxlength="240" placeholder="Explain why this withdrawal is rejected" required></label>' +
+          '<label>Reason for rejection <span style="color:#ff8fa3">*</span><input name="reason" minlength="3" maxlength="240" placeholder="Explain why this ' + kindWord.toLowerCase() + ' is rejected" required></label>' +
           '<div class="button-row"><button type="button" class="button secondary compact" data-action="close">Cancel</button>' +
           '<button class="button reject-submit-btn">✗ Reject</button></div>' +
           formStatus() + '</form>';
@@ -810,8 +1198,11 @@ root.addEventListener('click', async event => {
         if (!uid) break;
         if (select && action === 'default-client-currency') select.value = 'INR';
         await api.call('admin.client.update', { uid, currency, requestId: crypto.randomUUID() });
+        const row = visibleRows.get(uid);
+        if (row) row.currency = currency;
+        invalidateAdminCache(['clients', 'client', 'audit']);
         toast(action === 'default-client-currency' ? 'Client currency reset to admin default (INR).' : 'Client currency updated to ' + currency + '.');
-        await render();
+        await silentRefreshCurrentRoute();
         break;
       }
       case 'trade-mode': {
@@ -821,7 +1212,10 @@ root.addEventListener('click', async event => {
           for (const btn of group.querySelectorAll('.trade-pill')) btn.classList.remove('active');
           target.classList.add('active');
         }
+        const row = visibleRows.get(id);
+        if (row) row.tradeMode = mode;
         await api.call('admin.client.update', { uid: id, tradeMode: mode, requestId: crypto.randomUUID() });
+        invalidateAdminCache(['audit']);
         toast('Trade mode set to ' + mode.toUpperCase() + '.');
         break;
       }
@@ -848,6 +1242,7 @@ root.addEventListener('click', async event => {
       case 'delete-notification': {
         const uid = target.dataset.uid || '';
         await api.call('admin.notifications.delete', { id, uid, requestId: crypto.randomUUID() });
+        invalidateAdminCache(['audit']);
         toast('Notification removed.');
         if (uid) void loadClientNotifications(uid);
         break;
@@ -900,6 +1295,21 @@ root.addEventListener('change', event => {
   if (node.id === 'asset-select') { const asset = findAsset(node.value); if (asset) { selected = asset; updateMarket(); } }
   if (node.id === 'funding-status') { list().status = node.value; resetList(); void render(); }
 });
+async function refreshClientsSearch(val: string) {
+  list().search = val;
+  resetList();
+  const key = adminCacheKey('clients');
+  const cached = adminCache.get(key);
+  if (cached && !cached.dirty && Date.now() - cached.ts <= CACHE_TTL) {
+    applyCachedRows(cached.rows, cached.next);
+    if (!patchAdminDom('clients', cached.data)) {
+      content().innerHTML = buildAdminHtml('clients', cached.data);
+    }
+    return;
+  }
+  await silentRefreshCurrentRoute();
+}
+
 root.addEventListener('input', event => {
   const target = event.target as HTMLElement;
   const form = target.closest<HTMLFormElement>('form');
@@ -908,14 +1318,7 @@ root.addEventListener('input', event => {
     window.clearTimeout(searchDebounceTimer);
     const val = target.value;
     searchDebounceTimer = window.setTimeout(async () => {
-      list().search = val;
-      resetList();
-      await render();
-      const input = root.querySelector<HTMLInputElement>('.clients-search-input');
-      if (input) {
-        input.focus();
-        input.setSelectionRange(val.length, val.length);
-      }
+      await refreshClientsSearch(val);
     }, 380);
   }
 });
@@ -976,7 +1379,7 @@ root.addEventListener('submit', async event => {
   const started = version;
   try {
     if (await accountForm(op, values, form)) return;
-    if (op === 'search') { window.clearTimeout(searchDebounceTimer); list().search = String(values.search || ''); resetList(); await render(); return; }
+    if (op === 'search') { window.clearTimeout(searchDebounceTimer); await refreshClientsSearch(String(values.search || '')); return; }
     const params: Record<string, unknown> = { ...values, requestId: form.dataset.operationId ||= crypto.randomUUID() };
     if ('amount' in params) params.amount = cents(params.amount) * Number(values.adjSign || 1);
     delete params.adjSign;
@@ -1001,17 +1404,26 @@ root.addEventListener('submit', async event => {
       form.reset();
       showFormStatus(form, 'Notification sent.');
       toast('Notification pushed to client.');
+      invalidateAdminCache(['audit']);
       void loadClientNotifications(String(values.uid || ''));
       return;
     }
     panel().close();
     if (!admin) { const updated = await api.call<Home>('home'); if (started === version) setHome(updated); }
     if (started !== version) return;
-    if (op === 'admin.funding.decide') {
-      if (route !== 'overview') resetList();
-      void refreshAdminBadges();
+    if (admin) {
+      if (op === 'admin.funding.decide') {
+        invalidateAdminCache(['withdrawals', 'deposits', 'clients', 'client', 'overview', 'audit']);
+        void refreshAdminBadges();
+      } else if (op.startsWith('admin.client.')) {
+        invalidateAdminCache(['clients', 'client', 'overview', 'audit']);
+      } else {
+        invalidateAdminCache(['clients', 'client', 'audit']);
+      }
+      await silentRefreshCurrentRoute();
+    } else {
+      await render();
     }
-    await render();
     toast(op === 'trade.place' ? 'Simulated trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
   } catch (error) { showFormStatus(form, errorMessage(error)); }
   finally { delete form.dataset.busy; buttons.forEach(button => { button.disabled = false; }); }
@@ -1019,6 +1431,15 @@ root.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => {
   dismissNavigation();
   void render();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !access) return;
+  if (admin) {
+    const cached = adminCache.get(adminCacheKey(route));
+    if (!cached || cached.dirty) void silentRefreshCurrentRoute();
+  } else {
+    void silentRefreshUserView();
+  }
 });
 window.addEventListener('pagehide', stop);
 window.addEventListener('pageshow', event => {

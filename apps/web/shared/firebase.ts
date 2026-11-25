@@ -1,6 +1,7 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, setPersistence, type Auth } from 'firebase/auth';
+import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 
 export const emulator = import.meta.env.DEV || import.meta.env.MODE === 'emulator';
@@ -43,9 +44,11 @@ export async function connect(audience: string) {
     initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
   }
   const auth = getAuth(app);
+  const firestore = getFirestore(app);
   const functions = getFunctions(app, import.meta.env.VITE_FIREBASE_REGION || 'us-central1');
   if (emulator) {
     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFirestoreEmulator(firestore, '127.0.0.1', 8080);
     connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   }
   await setPersistence(auth, audience === 'user' && rememberPreference() ? browserLocalPersistence : browserSessionPersistence);
@@ -55,6 +58,16 @@ export async function connect(audience: string) {
     auth,
     async call<T>(op: string, args: Record<string, unknown> = {}) {
       return (await call({ op, ...args })).data as T;
+    },
+    watchAdminSync(onChange: (data: Record<string, unknown>) => void): Unsubscribe {
+      return onSnapshot(doc(firestore, 'meta', 'liveSync'), snap => {
+        onChange(snap.exists() ? snap.data() : {});
+      }, () => {});
+    },
+    watchUserSync(uid: string, onChange: (data: Record<string, unknown>) => void): Unsubscribe {
+      return onSnapshot(doc(firestore, 'userSync', uid), snap => {
+        onChange(snap.exists() ? snap.data() : {});
+      }, () => {});
     },
   };
 }
