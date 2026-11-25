@@ -1,118 +1,78 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <title>Register - Create Account | Q-Option</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="/assets/qoption-logo.png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css';">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css';">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" onerror="this.onerror=null;this.href='https://fonts.bunny.net/css?family=outfit:400,500,600,700,800,900|syne:600,700,800';">
-    <link rel="stylesheet" href="/shared/register.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Create your Qoption account to explore live crypto charts and trade with virtual funds.">
+  <title>Create account | Qoption</title>
+  <link rel="icon" type="image/png" href="/assets/qoption-logo.png">
+  <link rel="stylesheet" href="/shared/style.css">
+  <link rel="stylesheet" href="/shared/register.css">
 </head>
-<body class="auth-page">
-
-    <div class="auth-layout">
-        <aside class="auth-info">
-            <a class="auth-back" href="/home.html"><i class="bi bi-arrow-left"></i> Back to home</a>
-            <div class="auth-info-eyebrow"><i class="bi bi-broadcast"></i> Start trading today</div>
-            <h2 class="auth-info-title">Open your account and step into the room.</h2>
-            <p class="auth-info-copy">Create your workspace in minutes: a professional candle + line chart, a controlled BUY/SELL flow, and a wallet you can trust — ready across phone, tablet, and desktop.</p>
-            <ul class="auth-info-list">
-                <li><i class="bi bi-check-circle-fill"></i><span>Guided setup with an invitation code</span></li>
-                <li><i class="bi bi-check-circle-fill"></i><span>Live BTC pricing the moment you sign in</span></li>
-                <li><i class="bi bi-check-circle-fill"></i><span>Wallet, notifications, and history in one shell</span></li>
-            </ul>
-            <div class="auth-info-stats">
-                <div><strong>20+</strong><span>Markets tracked</span></div>
-                <div><strong>24/7</strong><span>Session access</span></div>
-                <div><strong>1 room</strong><span>For every decision</span></div>
-            </div>
-        </aside>
-
-        <div class="auth-form-pane">
-            <div class="auth-shell">
-                <div class="register-card auth-card">
-                    <div class="auth-brand">
-                        <img id="dynamicLogo" src="/assets/qoption-logo.png" alt="QOption Logo">
-                        <div class="auth-brand-name" id="dynamicProjectName">Q-Option</div>
-                    </div>
-                    <h1 class="auth-heading">Create account</h1>
-                    <p class="auth-copy">Complete the details below to open your Q-Option trading workspace.</p>
-                    
-                    <div id="alertBox" class="d-none alert alert-danger p-3 mb-4 text-center" role="alert"></div>
-
-                    <form id="registerForm" novalidate>
-                        <div class="mb-3">
-                            <label class="form-label auth-label" for="fullName">Full Name</label>
-                            <div class="auth-input-wrap">
-                                <i class="bi bi-person"></i>
-                                <input type="text" id="fullName" class="form-control" placeholder="John Doe" autocomplete="name" required>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label auth-label" for="email">Email Address</label>
-                            <div class="auth-input-wrap">
-                                <i class="bi bi-envelope"></i>
-                                <input type="email" id="email" class="form-control" placeholder="name@example.com" autocomplete="email" required>
-                            </div>
-                        </div>
-
-                        <div class="row g-2 mb-3">
-                            <div class="col-6">
-                                <label class="form-label auth-label" for="password">Password</label>
-                                <div class="auth-input-wrap">
-                                    <i class="bi bi-lock"></i>
-                                    <input type="password" id="password" class="form-control" placeholder="******" minlength="6" autocomplete="new-password" required>
-                                    <button type="button" class="auth-toggle" id="togglePassBtn" aria-label="Show password">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-6">
-                                <label class="form-label auth-label" for="confirmPass">Confirm</label>
-                                <div class="auth-input-wrap">
-                                    <i class="bi bi-lock-fill"></i>
-                                    <input type="password" id="confirmPass" class="form-control" placeholder="******" minlength="6" autocomplete="new-password" required>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mb-4">
-                            <label class="form-label auth-label" for="inviteCode">Invitation Code (Required)</label>
-                            <div class="auth-input-wrap">
-                                <i class="bi bi-ticket-perforated"></i>
-                                <input type="text" id="inviteCode" class="form-control" placeholder="Enter invitation code" required>
-                            </div>
-                            <div class="form-text small" style="color: var(--iq-muted); margin-top: 4px;">Ask your referrer or platform administrator for an invitation code.</div>
-                        </div>
-
-                        <div class="auth-note">
-                            <i class="bi bi-info-circle me-1"></i> Use an active email address. You will use it to access your trading account.
-                        </div>
-
-                        <label class="auth-check mb-3">
-                            <input type="checkbox" id="terms" required> I agree to the platform terms and confirm I am 18 or older.
-                        </label>
-
-                        <button type="submit" id="regBtn" class="btn btn-primary auth-submit w-100">
-                            <i class="bi bi-person-plus me-1"></i> Create account
-                        </button>
-                    </form>
-
-                    <div class="text-center mt-4">
-                        <small style="color: var(--iq-muted); font-weight: 700;">Already have an account?</small><br>
-                        <a href="/" class="text-link">Login Here</a>
-                        <div class="mt-3">
-                            <a href="/home.html" class="text-link"><i class="bi bi-arrow-up-right me-1"></i>Explore Q-Option</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<body class="register-page">
+  <header class="register-header">
+    <div class="register-header-inner">
+      <a class="brand" href="/home.html" aria-label="Qoption home">
+        <img class="brand-logo" src="/assets/qoption-logo.png" width="40" height="40" alt="">
+        <span class="brand-wordmark">Option</span>
+      </a>
+      <a class="register-help" href="/faq.html">Help center</a>
     </div>
+  </header>
 
-    <script type="module" src="/shared/register.ts"></script>
+  <main class="register-layout">
+    <section class="register-intro" aria-labelledby="register-intro-title">
+      <h2 id="register-intro-title">Follow the market.<br><span>Trade with virtual funds.</span></h2>
+      <p>Your account gives you access to live crypto prices, order controls, and your wallet in one place.</p>
+      <ul class="register-features">
+        <li><strong>Explore price movements</strong><span>Switch between candlesticks, closing prices, and volume.</span></li>
+        <li><strong>Review your orders</strong><span>Check the amount and expiry before confirming, then see the result in your history.</span></li>
+      </ul>
+      <a class="register-preview" href="/home.html#markets">Preview the markets <span aria-hidden="true">&rarr;</span></a>
+    </section>
+
+    <section class="register-card" aria-labelledby="register-title">
+      <div class="register-heading">
+        <h1 id="register-title">Create account</h1>
+        <p>Use an email address you can access to sign in.</p>
+      </div>
+      <form id="registerForm" method="post">
+        <fieldset class="register-fields" aria-label="Account details">
+          <label for="fullName">Full name
+            <input id="fullName" name="name" autocomplete="name" placeholder="Your full name" maxlength="60" pattern=".*\S.*" required>
+          </label>
+          <label for="email">Email address
+            <input type="email" id="email" name="email" autocomplete="email" placeholder="name@example.com" required>
+          </label>
+          <div class="register-passwords">
+            <div class="register-password-field">
+              <label for="password">Password</label>
+              <div class="register-password">
+                <input type="password" id="password" name="password" autocomplete="new-password" aria-describedby="register-password-hint" minlength="6" required>
+                <button type="button" id="togglePassBtn" aria-controls="password" aria-label="Show password">Show</button>
+              </div>
+            </div>
+            <label for="confirmPass">Confirm password
+              <input type="password" id="confirmPass" autocomplete="new-password" minlength="6" required>
+            </label>
+            <p id="register-password-hint" class="register-hint">Use at least 6 characters.</p>
+          </div>
+          <label for="inviteCode"><span>Invitation code <small>Optional</small></span>
+            <input id="inviteCode" name="inviteCode" autocomplete="off" maxlength="40" placeholder="Enter a code if you have one">
+          </label>
+          <label class="register-check" for="terms">
+            <input type="checkbox" id="terms" required>
+            <span>I confirm I am 18 or older and understand that orders use virtual funds.</span>
+          </label>
+        </fieldset>
+        <p class="register-status" id="registerStatus" role="status"></p>
+        <button type="submit" id="regBtn" class="button register-submit" disabled>Create account</button>
+      </form>
+      <p class="register-signin">Already have an account? <a href="/">Sign in</a></p>
+      <noscript><p class="register-status">Enable JavaScript to create an account.</p></noscript>
+    </section>
+  </main>
+
+  <script type="module" src="/shared/register.ts"></script>
 </body>
 </html>

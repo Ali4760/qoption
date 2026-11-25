@@ -1,11 +1,14 @@
 import './style.css';
 import './login.css';
+import './workspace.css';
+import './admin.css';
+import type { ChartMode } from './canvas-chart';
 import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail,
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, findAsset, profitPercent, type Asset } from '../../../functions/src/market';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
-import { adminNav, brand, brandContent, chartFrames, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, walletForms } from './screens';
+import { adminNav, adminNavGroups, brand, brandContent, chartFrames, chartModes, coin, fundingRows, ledgerRows, marketScreen, messages, openTrades, pair, title, tradeRows, userNav, userNavGroups, walletForms } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 
 const root = document.querySelector<HTMLElement>('#app')!;
@@ -17,6 +20,7 @@ let home: Home | undefined;
 let roles: string[] = [];
 let access = false, guestMarket = false, version = 0, authVersion = 0, clockOffset = 0;
 let route = first, selected: Asset = assets[0], frame = '1m';
+let liveChartMode: ChartMode = 'combined';
 let chart: ReturnType<typeof import('./canvas-chart').mountChart> | undefined;
 let refreshTimer = 0, toastTimer = 0, refreshing = false, registration = !admin && new URLSearchParams(location.search).get('mode') === 'register';
 let resolver: MultiFactorResolver | undefined;
@@ -60,7 +64,15 @@ function remember(page: Page, current: List) {
 function setHome(value: Home) {
   home = value; clockOffset = value.serverTime - Date.now();
   const balance = root.querySelector('#top-balance');
-  if (balance) balance.textContent = credits(value.wallet.available);
+  if (balance) {
+    balance.textContent = credits(value.wallet.available);
+    balance.closest('a')?.setAttribute('aria-label', 'Available credits: ' + balance.textContent);
+  }
+  const profileName = root.querySelector('#workspace-profile-name');
+  const avatar = root.querySelector('#workspace-avatar');
+  const name = value.profile.name?.trim() || 'Account';
+  if (profileName) profileName.textContent = name;
+  if (avatar) avatar.textContent = [...name][0].toUpperCase();
 }
 function toast(message: string) {
   const node = root.querySelector('#toast');
@@ -129,17 +141,32 @@ function authNotice(message: string) {
   const node = root.querySelector('#auth-notice');
   if (node) node.textContent = message;
 }
+function navigationLink([id, icon, name]: string[]) {
+  return '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span>' + name + '</a>';
+}
+
 function shell() {
-  root.innerHTML = '<div class="shell' + (admin ? ' admin-shell' : '') + '"><aside class="sidebar" id="sidebar">' + brand +
-    '<nav class="navigation" aria-label="' + (admin ? 'Staff' : 'Workspace') + ' navigation">' +
-    nav().map(([id, icon, name]) => '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span>' + name + '</a>').join('') +
-    '</nav><div class="side-bottom"><p class="quiet">' + esc(admin ? 'Staff workspace' : home?.profile.name) + '</p><a href="' + (admin ? '/' : '/admin/') + '">' +
-    (admin ? 'User site' : 'Staff sign-in') + '</a></div></aside><div class="work"><header class="topbar">' +
-    '<button class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
-    '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title">' +
-    (admin ? 'Admin panel' : 'Trading terminal') + '</span><div class="top-actions">' +
-    (admin ? '<span class="pill practice">Practice environment</span>' : '<a href="#wallet" class="top-balance"><span class="quiet">Practice Credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
-    '<button class="button secondary compact" data-action="signout">Sign out</button></div></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
+  const navigation = admin ? adminNavGroups.map(group => {
+    const links = group.links.filter(item => !item[3] || role(item[3]));
+    return links.length ? '<div class="admin-nav-group"><p class="admin-nav-label">' + group.name + '</p>' +
+      links.map(navigationLink).join('') + '</div>' : '';
+  }).join('') : userNavGroups.map(group =>
+    '<div class="workspace-nav-group"><p class="workspace-nav-label">' + group.name + '</p>' +
+    group.links.map(navigationLink).join('') + '</div>').join('');
+  const name = home?.profile.name?.trim() || 'Account';
+  const profile = admin ? '<p class="quiet">Staff access</p><div class="admin-role-list">' +
+    roles.map(name => '<span>' + esc(label(name)) + '</span>').join('') + '</div><a href="/">Open user site</a>' :
+    '<div class="workspace-profile"><span class="workspace-avatar" id="workspace-avatar" aria-hidden="true">' +
+    esc([...name][0].toUpperCase()) + '</span><strong id="workspace-profile-name">' + esc(name) + '</strong></div><a href="/admin/">Staff sign-in</a>';
+  const dismissMenu = '<button type="button" class="workspace-menu-dismiss" data-action="dismiss-menu" tabindex="-1" aria-label="Close navigation"></button>';
+  root.innerHTML = '<div class="shell ' + (admin ? 'admin-shell' : 'user-shell') + '"><aside class="sidebar" id="sidebar">' + brand +
+    '<nav class="navigation" aria-label="' + (admin ? 'Staff' : 'Workspace') + ' navigation">' + navigation +
+    '</nav><div class="side-bottom">' + profile + '</div></aside>' + dismissMenu + '<div class="work"><header class="topbar">' +
+    '<button type="button" class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
+    '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title" id="workspace-location">' +
+    (admin ? 'Admin dashboard' : 'Trade') + '</span><div class="top-actions">' +
+    (admin ? '<span class="pill practice">Virtual funds</span>' : '<a href="#wallet" class="top-balance" aria-label="Available credits: ' + credits(home?.wallet.available) + '"><span class="quiet">Available credits</span><strong id="top-balance">' + credits(home?.wallet.available) + '</strong></a>') +
+    '<button type="button" class="button secondary compact" data-action="signout">Sign out</button></div></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
 }
 async function start() {
   try {
@@ -167,13 +194,19 @@ async function start() {
 }
 async function renderUser(run: number) {
   if (!home) return '';
-  if (route === 'trade' || route === 'assets') return marketScreen(selected, frame, route === 'trade' ? home : undefined);
+  if (route === 'trade') return marketScreen(selected, frame, home);
+  if (route === 'assets') return marketScreen(selected, frame, undefined, liveChartMode);
   if (route === 'wallet') {
     const [updated, rows] = await Promise.all([api.call<Home>('home'), getPage(run, 'list', { list: 'funding' })]);
     if (run !== version) return '';
     setHome(updated);
     return title('Wallet', 'Manage practice credits and simulated funding requests.', 'Practice Credits') +
       walletForms(updated.wallet, updated.profile.withdrawalEnabled) + '<div class="dashboard-lower">' + section('Funding history', fundingRows(rows) + navigation()) + '</div>';
+  }
+  if (route === 'transactions') {
+    const rows = await getPage(run, 'list', { list: 'ledger' });
+    return title('Transaction history', 'Track changes to your available credits and funds on hold.', 'Virtual funds') +
+      section('Wallet activity', ledgerRows(rows) + navigation());
   }
   if (route === 'history') {
     const rows = await getPage(run, 'list', { list: 'trades' });
@@ -198,9 +231,13 @@ async function renderUser(run: number) {
       ['1', 'MarketLark', '242.00', '17'], ['2', 'BlueCandle', '188.00', '14'], ['3', 'HarborQuant', '146.00', '12'],
       ['4', 'RiverDelta', '112.00', '11'], ['5', 'NightSession', '84.00', '9'],
     ], 'No rankings'));
-  return title('Settings', 'Manage your workspace profile.') + section('Profile', '<div class="panel-body"><form class="stack" data-form="profile.update">' +
-    '<label>Name<input name="name" minlength="2" maxlength="50" value="' + esc(home.profile.name) + '" required></label><label>Account email<input value="' +
-    esc(home.profile.email) + '" readonly></label><div><button class="button">Save profile</button></div>' + formStatus() + '</form></div>');
+  return title('Settings', 'Manage your profile and account access.') + '<div class="two-panels">' +
+    section('Profile', '<div class="panel-body"><form class="stack" data-form="profile.update">' +
+      '<label>Display name<input name="name" autocomplete="name" minlength="2" maxlength="50" value="' + esc(home.profile.name) +
+      '" required></label><label>Account email<input type="email" value="' + esc(home.profile.email) +
+      '" readonly></label><div><button class="button">Save profile</button></div>' + formStatus() + '</form></div>') +
+    section('Sign-in', '<div class="panel-body"><button type="button" class="button secondary" data-action="reset">Reset password</button></div>',
+      'Request a reset link for your account email.') + '</div>';
 }
 
 async function renderClient(run: number) {
@@ -209,32 +246,42 @@ async function renderClient(run: number) {
   const page = thread ? await api.call<Page>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
   if (run !== version) return '';
   remember(page, current); visibleRows.set('@client', { ...data.profile, id: uid });
-  const balance = data.wallet ? '<div class="asset-strip"><article class="metric"><small>Available</small><strong>' + credits(data.wallet.available) +
-    '</strong></article><article class="metric"><small>In hold</small><strong>' + credits(data.wallet.held) + '</strong></article></div>' : '';
-  return title(data.profile.name, data.profile.email) + '<div class="button-row"><a class="button secondary compact" href="#clients">Back to clients</a></div>' +
-    '<div class="dashboard-lower">' + balance + section('Client details',
-      '<div class="filters">' + actionButton('client-tab', 'activity', 'Activity') + (role('support') ? actionButton('client-tab', 'messages', 'Messages') : '') +
-      (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') + (role('finance') ? actionButton('adjustment', uid, 'Adjust balance') : '') + '</div>' +
+  const balance = data.wallet ? '<div class="admin-client-balances"><article class="metric"><small>Available credits</small><strong>' +
+    credits(data.wallet.available) + '</strong></article><article class="metric"><small>Credits on hold</small><strong>' +
+    credits(data.wallet.held) + '</strong></article></div>' : '';
+  const identity = data.wallet ? '<section class="panel admin-client-identity"><header class="panel-heading"><h2>Account permissions</h2></header>' +
+    '<div class="panel-body"><dl><dt>Trading</dt><dd>' + state(data.profile.tradeEnabled ? 'enabled' : 'paused') +
+    '</dd><dt>Withdrawals</dt><dd>' + state(data.profile.withdrawalEnabled ? 'enabled' : 'paused') + '</dd></dl></div></section>' : '';
+  return title(data.profile.name, data.profile.email) +
+    '<div class="button-row admin-client-actions"><a class="button secondary compact" href="#clients">Back to clients</a>' +
+    (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') +
+    (role('finance') ? actionButton('adjustment', uid, 'Adjust credits') : '') + '</div>' +
+    '<div class="admin-client-summary">' + balance + identity + '</div>' +
+    section('Client activity', '<div class="filters" role="group" aria-label="Client activity view">' +
+      '<button type="button" class="button secondary compact" data-action="client-tab" data-id="activity" aria-pressed="' + String(!thread) + '">Activity</button>' +
+      (role('support') ? '<button type="button" class="button secondary compact" data-action="client-tab" data-id="messages" aria-pressed="' +
+        String(thread) + '">Messages</button>' : '') + '</div>' +
       (thread ? messages(page.rows, uid) : data.wallet ? ledgerRows(page.rows) : table(['Sender', 'Message', 'Date'],
-        page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) + navigation()) + '</div>';
+        page.rows.map(row => [esc(row.sender), esc(row.message), dateTime(row.createdAt)]), 'No client messages')) + navigation());
 }
 async function renderAdmin(run: number) {
   if (route === 'overview') {
     const values = await api.call<Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string }>('admin.dashboard');
     if (run === version) visibleRows = new Map([...values.recent, ...values.pending].map(row => [row.id, row]));
-    const cards = [['clients', 'Assigned clients'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
+    const cards = [['clients', 'Clients in your scope'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
     const inviteCode = values.invitationCode || 'QOPTION2026';
-    const inviteCard = '<article class="metric" style="border-color: rgba(31, 214, 164, 0.3); background: rgba(31, 214, 164, 0.05);">' +
-      '<small style="color: #1fd6a4;">Client Invitation Code</small>' +
-      '<strong style="font-family: monospace; color: #1fd6a4; letter-spacing: 1px;">' + esc(inviteCode) + '</strong>' +
-      '<button class="button secondary compact" data-action="copy-invite" data-code="' + esc(inviteCode) + '">Copy code</button>' +
-      '</article>';
-    return title('Admin dashboard', 'Monitor client accounts, trades, and funding requests.', 'Staff workspace') + '<div class="metrics">' +
-      cards.map(([key, name]) => '<article class="metric"><small>' + name + '</small><strong>' + Number(values[key] || 0).toLocaleString() + '</strong>' +
-        (nav().some(item => item[0] === key) ? '<a href="#' + key + '">View ' + key + '</a>' : '') + '</article>').join('') +
-      inviteCard + '</div>' +
-      section('Operations', '<div class="panel-body button-row">' + nav().filter(item => item[0] !== 'overview').map(([id,, name]) =>
-        '<a class="button secondary" href="#' + id + '">' + name + '</a>').join('') + '</div>') + '<div class="overview-panels dashboard-lower">' +
+    const inviteCard = '<section class="panel admin-invite"><div><h2>Client invitation code</h2>' +
+      '<p>New clients can save this reference when they register.</p></div><div class="admin-invite-code"><code>' + esc(inviteCode) + '</code>' +
+      '<button type="button" class="button secondary compact" data-action="copy-invite" data-code="' + esc(inviteCode) +
+      '">Copy code</button></div></section>';
+    return title('Admin dashboard', 'Monitor accounts, orders, and requests in your staff scope.', 'Virtual funds') + '<div class="admin-overview-grid">' +
+      cards.map(([key, name]) => {
+        const allowed = nav().some(item => item[0] === key);
+        const tag = allowed ? 'a' : 'article';
+        return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="#' + key + '"' : '') + '><small>' + name + '</small><strong>' +
+          Number(values[key] || 0).toLocaleString() + '</strong><span class="admin-metric-foot">' + (allowed ? 'View ' + key + ' ↗' : 'Current total') +
+          '</span></' + tag + '>';
+      }).join('') + '</div>' + inviteCard + '<div class="overview-panels dashboard-lower">' +
       (role('finance') ? section('Pending funding', table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
         esc(label(row.kind)), credits(row.amount), esc(recordReference(row.uid)), actionButton('review-funding', row.id, 'Review'),
       ]), 'No requests awaiting review')) : '') +
@@ -249,7 +296,7 @@ async function renderAdmin(run: number) {
       '<form class="filters" data-form="search"><label>Client name<input name="search" maxlength="50" value="' + esc(search) +
       '" placeholder="Search by name prefix"></label><button class="button secondary">Search</button></form>' +
       table(['Client', 'Email', 'Invite Code', 'Trading', 'Withdrawals', ''], rows.map(row => [esc(row.name), esc(row.email),
-        '<span style="font-family: monospace; color: var(--iq-green, #1fd6a4);">' + esc(row.invitation_code || '—') + '</span>',
+        '<code class="admin-code">' + esc(row.invitation_code || '—') + '</code>',
         state(row.tradeEnabled ? 'enabled' : 'paused'),
         state(row.withdrawalEnabled ? 'enabled' : 'paused'), actionButton('client', row.id, 'Open')]), 'No clients found') + navigation());
   }
@@ -279,6 +326,8 @@ async function render() {
   const run = ++version, target = part(0) || first;
   route = nav().some(item => item[0] === target) || (admin && target === 'client' && clientId()) ? target : first;
   visibleRows.clear();
+  const locationLabel = root.querySelector('#workspace-location');
+  if (locationLabel) locationLabel.textContent = routeName();
   for (const link of root.querySelectorAll<HTMLElement>('[data-nav]')) {
     if (link.dataset.nav === (route === 'client' ? 'clients' : route)) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -296,6 +345,7 @@ async function render() {
       if (run !== version) return;
       const price = root.querySelector('#market-price')!;
       chart = mountChart(root.querySelector<HTMLCanvasElement>('#market-chart')!, root.querySelector<HTMLElement>('#feed-status')!, value => { price.textContent = formatPrice(value); });
+      if (route === 'assets') chart.setMode(liveChartMode);
       chart.load(selected, frame, route === 'assets', clockOffset);
       if (route === 'trade') refreshTimer = window.setInterval(() => void clockTick(run), 1000);
     } else if (admin && (route === 'overview' || route === 'trades')) {
@@ -389,18 +439,42 @@ async function enroll() {
     '<form class="stack" data-form="enroll"><label>Six-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label>' +
     '<button class="button">Verify authenticator</button>' + formStatus() + '</form>');
 }
+function dismissNavigation(restoreFocus = false) {
+  root.querySelector('#sidebar')?.classList.remove('open');
+  const menu = root.querySelector<HTMLElement>('[data-action=menu]');
+  const main = root.querySelector<HTMLElement>('#content');
+  if (main) main.inert = false;
+  menu?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) menu?.focus();
+}
+
+window.matchMedia('(max-width: 680px)').addEventListener('change', event => {
+  if (!event.matches) dismissNavigation();
+});
+
+root.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && root.querySelector('.sidebar.open') && !panel().open) dismissNavigation(true);
+});
+
 root.addEventListener('click', async event => {
   const target = (event.target as Element).closest<HTMLElement>('[data-action], [data-nav]');
   if (!target) return;
   const action = target.dataset.action, id = target.dataset.id || '';
   const side = root.querySelector('#sidebar');
   if (target.dataset.nav) {
-    side?.classList.remove('open');
-    root.querySelector('[data-action=menu]')?.setAttribute('aria-expanded', 'false'); return;
+    dismissNavigation(side?.classList.contains('open'));
+    return;
   }
   try {
     switch (action) {
-      case 'menu': { const open = side?.classList.toggle('open'); target.setAttribute('aria-expanded', String(open)); if (open) side?.querySelector<HTMLElement>('a')?.focus(); break; }
+      case 'menu': {
+        const open = Boolean(side?.classList.toggle('open'));
+        target.setAttribute('aria-expanded', String(open));
+        content().inert = open;
+        if (open) side?.querySelector<HTMLElement>('a')?.focus();
+        break;
+      }
+      case 'dismiss-menu': dismissNavigation(true); break;
       case 'signout': await signOut(api.auth); break;
       case 'registration': registration = !registration; showAuth(); break;
       case 'guest-market': showGuestMarket(); break;
@@ -416,7 +490,7 @@ root.addEventListener('click', async event => {
       }
       case 'quick-start': await signInWithEmailAndPassword(api.auth, admin ? 'staff@example.test' : 'trader@example.test', 'QoptionDemo!2026'); break;
       case 'reset': {
-        const email = root.querySelector<HTMLInputElement>('form[data-form=auth] input[name=email]')?.value;
+        const email = person?.email || root.querySelector<HTMLInputElement>('form[data-form=auth] input[name=email]')?.value;
         dialog('Reset password', '<form class="stack" data-form="reset"><label>Email address<input type="email" name="email" value="' +
           esc(email) + '" required></label><button class="button">Send reset link</button>' + formStatus() + '</form>');
         break;
@@ -432,6 +506,15 @@ root.addEventListener('click', async event => {
       case 'reload': await render(); break;
       case 'asset': { const asset = findAsset(id); if (asset) { selected = asset; updateMarket(); } break; }
       case 'frame': if (chartFrames.includes(id)) { frame = id; updateMarket(); } break;
+      case 'chart-mode': {
+        if (route !== 'assets' || !Object.hasOwn(chartModes, id)) break;
+        liveChartMode = id as ChartMode;
+        chart?.setMode(liveChartMode);
+        for (const button of root.querySelectorAll<HTMLElement>('[data-action="chart-mode"]')) {
+          button.setAttribute('aria-pressed', String(button.dataset.id === liveChartMode));
+        }
+        break;
+      }
       case 'client': clientSection = 'activity'; go('client/' + encodeURIComponent(id)); break;
       case 'client-tab': clientSection = id === 'messages' ? 'messages' : 'activity'; await render(); break;
       case 'next': { const current = list(); if (current.next) { current.cursors[current.page + 1] = current.next; current.page++; await render(); } break; }
@@ -527,7 +610,10 @@ root.addEventListener('submit', async event => {
   } catch (error) { showFormStatus(form, errorMessage(error)); }
   finally { delete form.dataset.busy; buttons.forEach(button => { button.disabled = false; }); }
 });
-window.addEventListener('hashchange', () => void render());
+window.addEventListener('hashchange', () => {
+  dismissNavigation();
+  void render();
+});
 window.addEventListener('pagehide', stop);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
