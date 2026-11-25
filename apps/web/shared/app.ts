@@ -189,19 +189,19 @@ function showAuth(notice = '') {
     void attachPublicChart('#login-chart', '#login-chart-status', false);
     return;
   }
-  const heading = admin ? 'Admin sign-in' : registration ? 'Create your practice account' : 'Sign in';
+  const heading = admin ? 'Admin sign-in' : registration ? 'Create your trading account' : 'Sign in';
   const fields = '<label>Email<input name="email" type="email" autocomplete="email" required></label>' +
     '<label>Password<input name="password" type="password" autocomplete="' + (registration ? 'new-password' : 'current-password') + '" minlength="6" required></label>';
-  root.innerHTML = '<div class="auth-wrap"><div class="auth-intro">' + brand + '<h1>' + (admin ? 'Trading operations' : 'Your practice trading workspace') +
-    '</h1><p>' + (admin ? 'Review practice accounts, approve funding requests and monitor trading activity.' : 'Explore crypto markets, practise trades and follow each result in one workspace.') +
-    '</p><span class="pill practice">Practice environment</span></div><section class="auth-card"><h2>' + heading + '</h2>' +
+  root.innerHTML = '<div class="auth-wrap"><div class="auth-intro">' + brand + '<h1>' + (admin ? 'Trading operations' : 'Your live trading workspace') +
+    '</h1><p>' + (admin ? 'Review client accounts, approve funding requests and monitor trading activity.' : 'Explore live crypto markets, place trades and follow each result in one workspace.') +
+    '</p><span class="pill practice">Live terminal</span></div><section class="auth-card"><h2>' + heading + '</h2>' +
     (notice ? '<p class="error">' + esc(notice) + '</p>' : '') + (!person ? '<form data-form="auth">' + fields +
       '<button class="button">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>' : '') + '<div class="button-row">' +
     (!person && !admin ? '<button class="button secondary compact" data-action="registration">' + (registration ? 'Back to sign in' : 'Create an account') + '</button>' : '') +
     (!person ? '<button class="button secondary compact" data-action="reset">Reset password</button>' : '') +
     (person && admin && !emulator ? '<button class="button secondary compact" data-action="enroll">Set up authenticator</button>' : '') +
     (person ? '<button class="button secondary compact" data-action="signout">Sign out</button>' : '') +
-    (emulator && !person ? '<button class="button secondary" data-action="quick-start">Open practice workspace</button>' : '') +
+    (emulator && !person ? '<button class="button secondary" data-action="quick-start">Open trading workspace</button>' : '') +
     '<a href="' + (admin ? '/' : '/admin/') + '">' + (admin ? 'User site' : 'Staff sign-in') + '</a></div><p id="auth-notice" class="form-status" role="status"></p>' + dialogShell + '</section></div>';
 }
 async function attachPublicChart(canvasSelector: string, statusSelector: string, live: boolean) {
@@ -214,7 +214,7 @@ async function attachPublicChart(canvasSelector: string, statusSelector: string,
     const price = live ? root.querySelector<HTMLElement>('#market-price') : null;
     chart = mountChart(canvas, status, value => { if (price) price.textContent = formatPrice(value); });
     chart.load(live ? selected : assets[0], live ? frame : '5m', live);
-    if (!live) status.textContent = 'Simulated chart';
+    if (!live) status.textContent = 'Live chart';
   } catch {
     if (status.isConnected) status.textContent = 'Chart unavailable';
   }
@@ -665,8 +665,8 @@ type OverviewData = Record<string, number> & { recent: Row[]; pending: Row[]; in
 type ListBundle = { rows: Row[]; next: string | null };
 
 function clientSummaryHtml(data: ClientBundle['data']) {
-  const balance = data.wallet ? '<div class="admin-client-balances"><article class="metric"><small>Available credits</small><strong>' +
-    credits(data.wallet.available) + '</strong></article><article class="metric"><small>Credits on hold</small><strong>' +
+  const balance = data.wallet ? '<div class="admin-client-balances"><article class="metric"><small>Available balance</small><strong>₹' +
+    credits(data.wallet.available) + '</strong></article><article class="metric"><small>Balance on hold</small><strong>₹' +
     credits(data.wallet.held) + '</strong></article></div>' : '';
   const identity = data.wallet ? '<section class="panel admin-client-identity"><header class="panel-heading"><h2>Account permissions</h2></header>' +
     '<div class="panel-body"><dl><dt>Trading</dt><dd>' + state(data.profile.tradeEnabled ? 'enabled' : 'paused') +
@@ -1254,7 +1254,7 @@ function details(action: string, row: Row) {
   if (action === 'trade-detail') {
     dialog('Trade details', definition([['Reference', recordReference(row.id)], ['Asset', String(row.symbol).replace('USDT', '/USDT')],
       ['Direction', label(row.direction)], ['Stake', credits(row.stake)], ['Entry price', row.entry], ['Expiry', dateTime(row.dueAt)],
-      ['Exit price', row.exit], ['Result', label(row.outcome || row.status)], ['Net result', row.pnl === undefined ? '—' : credits(row.pnl) + ' Practice Credits']]));
+      ['Exit price', row.exit], ['Result', label(row.outcome || row.status)], ['Net result', row.pnl === undefined ? '—' : '₹' + credits(row.pnl)]]));
     return;
   }
   const id = esc(row.id);
@@ -1301,7 +1301,7 @@ function clientAction(action: string, id: string) {
   const target = visibleRows.get('@client');
   if (!target || target.id !== id) return;
   const restrict = action === 'restrictions';
-  dialog(restrict ? 'Client restrictions' : 'Adjust practice balance',
+  dialog(restrict ? 'Client restrictions' : 'Adjust client balance',
     '<form class="stack" data-form="' + (restrict ? 'admin.client.restrict' : 'admin.client.adjust') + '"><input type="hidden" name="uid" value="' + esc(id) + '">' +
     (restrict ? '<label class="check-row"><input type="checkbox" name="tradeEnabled" ' + (target.tradeEnabled ? 'checked' : '') +
       '>Allow new trades</label><label class="check-row"><input type="checkbox" name="withdrawalEnabled" ' + (target.withdrawalEnabled ? 'checked' : '') +
@@ -1898,7 +1898,7 @@ root.addEventListener('click', async event => {
       }
     }
   } catch (error) {
-    if (action === 'quick-start') authNotice('Start the emulators and run npm run seed to open the practice workspace.');
+    if (action === 'quick-start') authNotice('Start the emulators and run npm run seed to open the trading workspace.');
     else if (access) toast(errorMessage(error));
     else authNotice(errorMessage(error));
   }
@@ -2186,7 +2186,7 @@ root.addEventListener('submit', async event => {
       }
       await render();
     }
-    toast(op === 'trade.place' ? 'Simulated trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
+    toast(op === 'trade.place' ? 'Trade placed.' : op.endsWith('message.send') ? 'Message sent.' : 'Changes saved.');
   } catch (error) {
     if (!admin && access) clientAlert('Error', errorMessage(error));
     else showFormStatus(form, errorMessage(error));

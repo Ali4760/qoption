@@ -39,7 +39,7 @@ function identifier(value: unknown): string {
 }
 function cents(value: unknown, signed = false): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || Math.abs(value) > maxAmount || (signed ? value === 0 : value < 100)) {
-    fail('invalid-argument', 'Enter an amount within the practice limits.');
+    fail('invalid-argument', 'Enter an amount within the allowed limits.');
   }
   return value;
 }
@@ -72,7 +72,7 @@ function audit(tx: Transaction, actor: Actor, target: string, event: string, rea
   tx.create(db.collection('audit').doc(), { uid: target, actor: actor.uid, event, reason, createdAt: now });
 }
 function changeFunds(tx: Transaction, uid: string, current: DocumentData | undefined, availableDelta: number, heldDelta: number) {
-  if (!current) fail('failed-precondition', 'Open the workspace before changing the practice wallet.');
+  if (!current) fail('failed-precondition', 'Open the workspace before modifying wallet balance.');
   const available = current.available + availableDelta;
   const held = current.held + heldDelta;
   if (!Number.isSafeInteger(available) || !Number.isSafeInteger(held) || available < 0 || held < 0) {
@@ -114,7 +114,7 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
     }
     if (!balance.exists) {
       tx.create(wallet(uid), { available: openingAmount, held: 0 });
-      ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Practice trading credit');
+      ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Initial account credit');
     }
   });
   if (created) await bumpSync({ clientsAt: Date.now() }, [uid]);
@@ -309,7 +309,7 @@ async function askFunding(user: Actor, data: Data) {
   const ref = db.collection('funding').doc();
   const method = typeof data.method === 'string' && data.method.trim()
     ? data.method.trim().slice(0, 64)
-    : (kind === 'withdrawal' ? 'Bank Transfer' : 'Simulated transfer');
+    : (kind === 'withdrawal' ? 'Bank Transfer' : 'Direct transfer');
   const note = typeof data.note === 'string' && data.note.trim() ? data.note.trim().slice(0, 240) : '';
   const bankDetails = kind === 'withdrawal' ? cleanBankDetails(data.bankDetails) : null;
   const withdrawalPin = typeof data.withdrawalPin === 'string' ? data.withdrawalPin.trim() : '';
@@ -712,7 +712,7 @@ async function adminClientCreate(user: Actor, data: Data) {
       assignedTo: user.allClients ? '' : user.uid,
     });
     tx.create(wallet(created.uid), { available: openingAmount, held: 0 });
-    ledger(tx, created.uid, 'opening_' + created.uid, 'Opening balance', openingAmount, 0, now, 'Practice trading credit');
+    ledger(tx, created.uid, 'opening_' + created.uid, 'Opening balance', openingAmount, 0, now, 'Initial account credit');
     audit(tx, user, created.uid, 'Client created', `Created client account: ${name} (${email})`, now);
   });
   await bumpSync({ clientsAt: now, auditAt: now });

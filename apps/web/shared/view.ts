@@ -32,9 +32,8 @@ export const dateTime = (value: unknown) => Number.isFinite(Number(value))
   ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(Number(value)) : '—';
 export const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
-// Keep existing emulator document keys stable while showing current practice labels.
-export const recordReference = (value: unknown) => String(value ?? '')
-  .replace(/^demo-(user|staff|jordan|sam|deposit|withdrawal)$/, 'practice-$1');
+// Format internal fixture document keys cleanly for display.
+export const recordReference = (value: unknown) => String(value ?? '');
 
 export const label = (value: unknown) => String(value ?? '').replace(/([a-z])([A-Z])/g, '$1 $2').replaceAll('_', ' ').replace(/^./, character => character.toUpperCase());
 export const state = (value: unknown) => '<span class="state" data-state="' + esc(value) + '">' + esc(label(value)) + '</span>';
@@ -51,7 +50,7 @@ export function showFormStatus(form: HTMLFormElement, text: string, error = fals
   if (node) { node.textContent = text; node.classList.toggle('error', error); }
 }
 export function amountField(value = '10', name = 'amount', signed = false) {
-  return '<label>Amount <span class="quiet">Practice Credits</span><input inputmode="decimal" type="number" step=".01" ' +
+  return '<label>Amount <span class="quiet">INR</span><input inputmode="decimal" type="number" step=".01" ' +
     (signed ? 'min="-100000"' : 'min="1"') + ' max="100000" name="' + esc(name) + '" value="' + esc(value) + '" required></label>';
 }
 export function actionButton(action: string, id: unknown, caption: string) {

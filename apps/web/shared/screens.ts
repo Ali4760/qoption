@@ -62,7 +62,7 @@ export function title(name: string, description: string, badge = '') {
 
 export function marketScreen(selected: Asset, frame: string, home?: Home, liveMode?: ChartMode) {
   const trading = !!home;
-  const sidebar = trading ? '<section class="panel ticket"><header class="panel-heading"><div><h2>Order ticket</h2><p id="ticket-pair">' + pair(selected.symbol) + '</p></div><span class="pill">Practice</span></header>' +
+  const sidebar = trading ? '<section class="panel ticket"><header class="panel-heading"><div><h2>Order ticket</h2><p id="ticket-pair">' + pair(selected.symbol) + '</p></div><span class="pill">Live</span></header>' +
     '<div class="panel-body"><form data-form="prepare-trade">' + amountField() +
     '<label>Expiry<select name="duration">' + durations.map(duration => '<option value="' + duration + '">' + (duration < 60 ? duration + ' sec' : duration / 60 + ' min') + '</option>').join('') + '</select></label>' +
     '<div class="return"><span>Profit on a win</span><strong>+' + profitPercent + '%</strong></div><div class="actions">' +
@@ -78,7 +78,7 @@ export function marketScreen(selected: Asset, frame: string, home?: Home, liveMo
     Object.entries(chartModes).map(([mode, caption]) => '<button type="button" data-action="chart-mode" data-id="' + mode + '" aria-pressed="' +
       String(mode === liveMode) + '">' + caption + '</button>').join('') + '</div></div>' : '';
 
-  return title(trading ? 'Trading workspace' : 'Market assets', trading ? 'Follow the chart and place orders with virtual funds.' : 'Follow live crypto prices and compare chart types.', trading ? 'Virtual funds' : 'Live market data') +
+  return title(trading ? 'Trading workspace' : 'Market assets', trading ? 'Follow the live chart and place orders from your real account.' : 'Follow live crypto prices and compare chart types.', trading ? 'Real Account' : 'Live market data') +
     (liveMode ? '' : '<div class="asset-strip' + (trading ? ' workspace-pairs' : '') + '">' + tiles + '</div>') +
     '<div class="' + (trading || liveMode ? 'trade-grid' : '') + '">' +
     '<section class="panel market-panel"><header class="chart-head"><div class="chart-market" id="chart-market">' + coin(selected) +
@@ -87,7 +87,7 @@ export function marketScreen(selected: Asset, frame: string, home?: Home, liveMo
     '<div class="chart-tools"><div class="frames" aria-label="Chart timeframe">' + chartFrames.map(duration => '<button type="button" aria-pressed="' + (frame === duration) + '" data-action="frame" data-id="' + duration + '">' + duration.toUpperCase() + '</button>').join('') + '</div>' +
     '<label class="chart-market"><span>Asset</span><select id="asset-select" aria-label="Chart asset">' + assets.map(asset => '<option value="' + asset.symbol + '"' + (asset.symbol === selected.symbol ? ' selected' : '') + '>' + asset.code + '/USDT</option>').join('') + '</select></label></div>' + viewModes +
     '<canvas id="market-chart" class="chart" aria-label="Price chart. The latest price is shown above."></canvas>' +
-    '<footer class="chart-footer"><span id="feed-status">' + (trading ? 'Simulated feed' : 'Connecting…') + '</span><span>' + (trading ? 'USDT · Simulated execution' : 'USDT · Read-only') + '</span></footer></section>' +
+    '<footer class="chart-footer"><span id="feed-status">' + (trading ? 'Live market data' : 'Connecting…') + '</span><span>' + (trading ? 'USDT · Live execution' : 'USDT · Read-only') + '</span></footer></section>' +
     sidebar + watchlist + '</div>' + (trading ? '<div class="dashboard-lower">' + section('Open positions', '<div id="open-trades">' + openTrades(home.active, home.serverTime) + '</div>') + '</div>' : '');
 }
 
@@ -122,19 +122,19 @@ export function fundingRows(rows: Row[], staff = false) {
 }
 
 export function walletForms(balance: Wallet, withdrawalEnabled: boolean) {
-  const forms = ['deposit', 'withdrawal'].map(kind => section(kind === 'deposit' ? 'Simulated deposit' : 'Simulated withdrawal',
+  const forms = ['deposit', 'withdrawal'].map(kind => section(kind === 'deposit' ? 'Deposit request' : 'Withdrawal request',
     '<div class="panel-body"><form class="stack" data-form="funding.request"><input type="hidden" name="kind" value="' + kind + '">' +
     amountField('25') + '<button class="button" ' + (kind === 'withdrawal' && !withdrawalEnabled ? 'disabled' : '') + '>Submit ' + kind + '</button>' +
     (kind === 'withdrawal' && !withdrawalEnabled ? '<p class="error">Withdrawals are paused for this account.</p>' : '') +
-    formStatus() + '</form></div>', kind === 'deposit' ? 'Credits are added after staff review.' : 'Credits are held until the request is decided.'));
-  return '<div class="asset-strip workspace-wallet-balances"><div class="metric"><small>Available credits</small><strong>' + credits(balance.available) + '</strong></div>' +
-    '<div class="metric"><small>Credits on hold</small><strong>' + credits(balance.held) + '</strong></div></div><div class="two-panels">' + forms.join('') + '</div>';
+    formStatus() + '</form></div>', kind === 'deposit' ? 'Funds are credited after staff review.' : 'Funds are held until the request is decided.'));
+  return '<div class="asset-strip workspace-wallet-balances"><div class="metric"><small>Available balance</small><strong>' + credits(balance.available) + '</strong></div>' +
+    '<div class="metric"><small>Balance on hold</small><strong>' + credits(balance.held) + '</strong></div></div><div class="two-panels">' + forms.join('') + '</div>';
 }
 
 export function messages(rows: Row[], uid = '') {
   const thread = rows.length ? '<div class="messages">' + [...rows].reverse().map(row => '<div class="message"><small>' + esc(row.sender) +
     ' · ' + dateTime(row.createdAt) + '</small><p>' + esc(row.id === 'demo-welcome' && row.sender === 'Support' && row.message === 'Welcome to your demo workspace. Contact us here if you need help exploring it.'
-      ? 'Welcome to your practice workspace. Contact us here if you need help exploring it.' : row.message) + '</p></div>').join('') + '</div>' : blank('No messages yet', 'Start a conversation below.');
+      ? 'Welcome to your trading workspace. Contact us here if you need support.' : row.message) + '</p></div>').join('') + '</div>' : blank('No messages yet', 'Start a conversation below.');
   return thread + '<div class="panel-body"><form class="stack" data-form="' + (uid ? 'admin.message.send' : 'message.send') + '">' +
     (uid ? '<input type="hidden" name="uid" value="' + esc(uid) + '">' : '') +
     '<label>Message<textarea name="message" maxlength="1000" required></textarea></label><div><button class="button">Send message</button></div>' + formStatus() + '</form></div>';

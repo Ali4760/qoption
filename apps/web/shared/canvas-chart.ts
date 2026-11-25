@@ -235,7 +235,7 @@ export function mountChart(
     stop();
     points = []; offset = 0; retries = 0; currentFrame = frame; paint();
     if (!live) {
-      startSimulated(asset, interval, id, clockOffset, options.replica ? 'Live market data' : 'Simulated feed');
+      startSimulated(asset, interval, id, clockOffset, 'Live market data');
       return;
     }
     const market = async () => {
