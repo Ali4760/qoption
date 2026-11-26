@@ -763,7 +763,13 @@ async function start() {
 }
 type SupportPage = Page & { supportUnreadMarker?: string };
 type ClientBundle = { data: { profile: Profile; wallet: Wallet | null; activity: Page }; page: SupportPage };
-type OverviewData = Record<string, number> & { recent: Row[]; pending: Row[]; invitationCode?: string };
+type OverviewData = {
+  clients: number;
+  trades: number;
+  deposits: number;
+  withdrawals: number;
+  invitationCode?: string;
+};
 type ListBundle = { rows: Row[]; next: string | null };
 
 function clientSummaryHtml(data: ClientBundle['data']) {
@@ -796,18 +802,14 @@ function buildClientDetailHtml(bundle: ClientBundle) {
     '<div id="client-activity-body">' + clientActivityBodyHtml(uid, data, page) + '</div></section>';
 }
 
-function overviewPendingBody(values: OverviewData) {
-  return table(['Request', 'Amount', 'Client', ''], values.pending.map(row => [
-    esc(label(row.kind)), credits(row.amount), esc(String(row.clientName || recordReference(row.uid))), actionButton('review-funding', row.id, 'Review'),
-  ]), 'No requests awaiting review');
-}
-function overviewRecentBody(values: OverviewData) {
-  return table(['Market', 'Direction', 'Status', ''], values.recent.map(row => [
-    pair(row.symbol), state(row.direction), state(row.outcome || row.status), actionButton('trade-detail', row.id, 'Details'),
-  ]), 'No recent trades');
-}
+const overviewCards = [
+  ['clients', 'Clients in your scope'],
+  ['trades', 'Open trades'],
+  ['deposits', 'Pending deposits'],
+  ['withdrawals', 'Pending withdrawals'],
+] as const;
+
 function buildOverviewHtml(values: OverviewData) {
-  const cards = [['clients', 'Clients in your scope'], ['trades', 'Open trades'], ['deposits', 'Pending deposits'], ['withdrawals', 'Pending withdrawals']];
   const inviteCode = values.invitationCode || '';
   const inviteCard = '<section class="panel admin-invite"><div class="admin-invite-copy"><h2>Client Invitation Code</h2>' +
     '<p>Share this code with new clients to register under your management.</p></div><div class="admin-invite-right"><code id="invite-code">' + esc(inviteCode) + '</code>' +
@@ -816,15 +818,13 @@ function buildOverviewHtml(values: OverviewData) {
     '<button type="button" class="invite-icon-btn" data-action="copy-invite" data-code="' + esc(inviteCode) + '" title="Copy invitation code" aria-label="Copy invitation code">' + adminActionIcons.copy + '</button>' +
     '</div></div></section>';
   return title('Admin dashboard', 'Monitor accounts, orders, and requests in your staff scope.') + '<div class="admin-overview-grid">' +
-    cards.map(([key, name]) => {
+    overviewCards.map(([key, name]) => {
       const allowed = nav().some(item => item[0] === key);
       const tag = allowed ? 'a' : 'article';
       return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="#' + key + '"' : '') + '><small>' + name + '</small><strong data-metric="' + key + '">' +
         Number(values[key] || 0).toLocaleString() + '</strong><span class="admin-metric-foot">' + (allowed ? 'View ' + key + ' ↗' : 'Current total') +
         '</span></' + tag + '>';
-    }).join('') + '</div>' + inviteCard + '<div class="overview-panels dashboard-lower">' +
-    (role('finance') ? '<section class="panel" id="overview-pending-panel"><header class="panel-heading"><h2>Pending funding</h2></header><div class="panel-table-host">' + overviewPendingBody(values) + '</div></section>' : '') +
-    (role('admin') ? '<section class="panel" id="overview-recent-panel"><header class="panel-heading"><h2>Recent trades</h2></header><div class="panel-table-host">' + overviewRecentBody(values) + '</div></section>' : '') + '</div>';
+    }).join('') + '</div>' + inviteCard;
 }
 
 function clientStatusHtml(row: Row, now = Date.now() + clockOffset) {
@@ -1035,7 +1035,7 @@ async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ 
   if (targetRoute === 'overview') {
     const values = await api.call<OverviewData>('admin.dashboard');
     setAdminBadges(values.deposits, values.withdrawals);
-    return { payload: values, rows: [...values.recent, ...values.pending], next: null };
+    return { payload: values, rows: [], next: null };
   }
   if (targetRoute === 'client') {
     const uid = clientId(), thread = clientSection() === 'messages';
@@ -1114,7 +1114,7 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
   if (targetRoute === 'overview') {
     const values = payload as OverviewData;
     setAdminBadges(values.deposits, values.withdrawals);
-    for (const key of ['clients', 'trades', 'deposits', 'withdrawals']) {
+    for (const [key] of overviewCards) {
       const el = root.querySelector<HTMLElement>('[data-metric="' + key + '"]');
       if (!el) return false;
       const formatted = Number(values[key] || 0).toLocaleString();
@@ -1125,16 +1125,6 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
     if (codeEl && codeEl.textContent !== inviteCode) codeEl.textContent = inviteCode;
     const copyBtn = root.querySelector<HTMLElement>('[data-action="copy-invite"]');
     if (copyBtn) copyBtn.dataset.code = inviteCode;
-    const pendingHost = root.querySelector<HTMLElement>('#overview-pending-panel .panel-table-host');
-    if (pendingHost) {
-      const html = overviewPendingBody(values);
-      if (pendingHost.innerHTML !== html) pendingHost.innerHTML = html;
-    }
-    const recentHost = root.querySelector<HTMLElement>('#overview-recent-panel .panel-table-host');
-    if (recentHost) {
-      const html = overviewRecentBody(values);
-      if (recentHost.innerHTML !== html) recentHost.innerHTML = html;
-    }
     return true;
   }
   if (targetRoute === 'client') {
@@ -2035,9 +2025,11 @@ root.addEventListener('click', async event => {
           '<label class="toggle-row"><span class="toggle-switch-wrap"><input type="checkbox" name="withdrawalEnabled" class="toggle-cb"' + (row.withdrawalEnabled ? ' checked' : '') + '><span class="toggle-track"></span></span>Allow Withdrawals</label>' +
           '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="frozen" class="toggle-cb freeze-cb"' + (row.frozen ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE ACCOUNT <span class="freeze-note">(Restrict All Access)</span></label>' +
           '<label class="toggle-row freeze"><span class="toggle-switch-wrap"><input type="checkbox" name="freezeAmount" class="toggle-cb freeze-cb"' + (row.freezeAmount ? ' checked' : '') + '><span class="toggle-track"></span></span>FREEZE AMOUNT</label>' +
-          '<label class="frozen-amount-field">Amount to freeze<input type="number" name="frozenAmount" min="0.01" step="0.01"' + (row.freezeAmount ? '' : ' disabled') + ' value="' +
+          '<div class="frozen-amount-field"><label for="adminFrozenAmount">Amount to freeze</label>' +
+          '<div class="frozen-amount-entry"><input type="number" id="adminFrozenAmount" name="frozenAmount" min="0.01" step="0.01"' + (row.freezeAmount ? '' : ' disabled') + ' value="' +
           (row.freezeAmount && frozenAmount > 0 ? (frozenAmount / 100).toFixed(2) : '') +
-          '"><small>Enter an amount to reserve it from trades and withdrawals. Leave it blank to freeze all withdrawals.</small></label>' +
+          '"><button type="button" class="button secondary compact" data-action="max-frozen-amount" aria-label="Max freeze amount">Max</button></div>' +
+          '<small>Enter an amount to reserve it from trades and withdrawals. Leave it blank to freeze all withdrawals.</small></div>' +
           '</div>' +
           '<div class="currency-section"><h3>Client currency</h3>' +
           '<label>CURRENCY OVERRIDE<select name="currency">' +
@@ -2054,6 +2046,26 @@ root.addEventListener('click', async event => {
           '<button class="button">Save Client</button></div>' +
           formStatus() + '</form>';
         if (!box.open) box.showModal();
+        break;
+      }
+      case 'max-frozen-amount': {
+        const form = target.closest<HTMLFormElement>('form[data-form="admin.client.update"]');
+        const amount = form?.querySelector<HTMLInputElement>('[name="frozenAmount"]');
+        if (!form || !amount || amount.disabled || form.dataset.busy) break;
+        const uid = form.querySelector<HTMLInputElement>('[name="uid"]')?.value || '';
+        const balance = Number(visibleRows.get(uid)?.balance);
+        if (!Number.isSafeInteger(balance)) {
+          showFormStatus(form, 'The balance is unavailable. Refresh the client list and try again.', true);
+          break;
+        }
+        if (balance <= 0) {
+          showFormStatus(form, 'This client has no available balance to freeze.', true);
+          break;
+        }
+        const maximum = (balance / 100).toFixed(2);
+        if (amount.value !== maximum) delete form.dataset.operationId;
+        amount.value = maximum;
+        showFormStatus(form, '');
         break;
       }
       case 'save-client-currency':

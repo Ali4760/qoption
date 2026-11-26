@@ -13,7 +13,6 @@ const db = getFirestore();
 const local = process.env.FUNCTIONS_EMULATOR === 'true';
 const requireAppCheck = defineBoolean('REQUIRE_APP_CHECK', { default: true });
 const region = defineString('QOPTION_REGION', { default: 'us-central1' });
-const openingAmount = 100000;
 const maxAmount = 100000000;
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 type Data = Record<string, unknown>;
@@ -147,8 +146,7 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
       tx.update(profile(uid), updates);
     }
     if (!balance.exists) {
-      tx.create(wallet(uid), { available: openingAmount, held: 0 });
-      ledger(tx, uid, 'opening_' + uid, 'Opening balance', openingAmount, 0, Date.now(), 'Initial account credit');
+      tx.create(wallet(uid), { available: 0, held: 0 });
     }
   });
   if (created) await bumpSync({ clientsAt: Date.now() }, [uid]);
@@ -877,8 +875,7 @@ async function adminClientCreate(user: Actor, data: Data) {
       tradeMode: 'auto',
       assignedTo: user.allClients ? '' : user.uid,
     });
-    tx.create(wallet(created.uid), { available: openingAmount, held: 0 });
-    ledger(tx, created.uid, 'opening_' + created.uid, 'Opening balance', openingAmount, 0, now, 'Initial account credit');
+    tx.create(wallet(created.uid), { available: 0, held: 0 });
     audit(tx, user, created.uid, 'Client created', `Created client account: ${name} (${email})`, now);
   });
   await bumpSync({ clientsAt: now, auditAt: now });

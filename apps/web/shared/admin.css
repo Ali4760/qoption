@@ -388,12 +388,6 @@
   to { transform: rotate(360deg); }
 }
 
-/* ─── Overview bottom panels ─────────────────────────────── */
-.admin-shell .overview-panels {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
 .admin-shell .dashboard-lower { margin-top: 20px; }
 
 /* ─── Tables ──────────────────────────────────────────────── */
@@ -708,7 +702,6 @@
   .admin-shell { grid-template-columns: 190px minmax(0, 1fr); }
   .admin-shell .admin-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-shell .admin-metric { min-height: 136px; }
-  .admin-shell .overview-panels { grid-template-columns: minmax(0, 1fr); }
   .admin-shell .admin-client-summary { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -1281,6 +1274,15 @@
 .admin-shell ~ dialog .permissions-section:has([name="freezeAmount"]:checked) .frozen-amount-field {
   display: grid;
   gap: 5px;
+}
+.admin-shell ~ dialog .frozen-amount-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+.admin-shell ~ dialog .frozen-amount-entry input {
+  min-width: 0;
 }
 .admin-shell ~ dialog .frozen-amount-field small {
   color: #93acc6;

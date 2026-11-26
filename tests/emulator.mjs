@@ -35,12 +35,22 @@ async function main() {
   const trader = await identityCall('signUp', email);
   const staff = await identityCall('signInWithPassword', 'staff@example.test');
   const uid = trader.localId;
+  const testClientUids = [uid];
   let otherStaff;
   try {
     await call(null, 'access', {}, 401);
     await call(trader, 'admin.access', {}, 403);
     const start = await call(trader, 'access');
-    assert.equal(start.wallet.available, 100000);
+    assert.deepEqual(start.wallet, { available: 0, held: 0 });
+    assert.deepEqual((await call(trader, 'list', { list: 'ledger' })).rows, []);
+
+    const adminCreatedEmail = 'admin-created-' + randomUUID() + '@example.test';
+    const adminCreated = await call(staff, 'admin.client.create', { name: 'Test Client', email: adminCreatedEmail, password });
+    testClientUids.push(adminCreated.uid);
+    const adminCreatedClient = await identityCall('signInWithPassword', adminCreatedEmail);
+    assert.deepEqual((await call(adminCreatedClient, 'access')).wallet, { available: 0, held: 0 });
+    assert.deepEqual((await call(adminCreatedClient, 'list', { list: 'ledger' })).rows, []);
+
     const unauthorised = await fetch('http://127.0.0.1:8080/v1/projects/demo-qoption/databases/(default)/documents/wallets/' + uid, {
       headers: { Authorization: 'Bearer ' + trader.idToken },
     });
@@ -60,6 +70,9 @@ async function main() {
     ]);
     const listedClient = (await call(staff, 'admin.clients', { search: uid })).rows.find(row => row.id === uid);
     assert.equal(listedClient?.lastActiveAt, resumedActivity.lastActiveAt);
+
+    await call(staff, 'admin.client.adjust', { uid, amount: 100000, reason: 'Fund integration test wallet', requestId: randomUUID() });
+    assert.deepEqual((await call(trader, 'access')).wallet, { available: 100000, held: 0 });
 
     const tradeInput = { symbol: 'BTCUSDT', amount: 1000, direction: 'up', duration: 30, requestId: randomUUID() };
     const [placed, retry] = await Promise.all([call(trader, 'trade.place', tradeInput), call(trader, 'trade.place', tradeInput)]);
@@ -208,18 +221,20 @@ async function main() {
     const unfrozenWithdrawal = await withdraw(100);
     await call(trader, 'funding.cancel', { id: unfrozenWithdrawal.id, requestId: randomUUID() });
 
-    console.log('Firebase integration passed: account separation, rules, client activity, trades, funding references, deposit settings, support chat, notifications, wallet freezes, and pagination.');
+    console.log('Firebase integration passed: zero opening balances, account separation, rules, client activity, trades, funding references, deposit settings, support chat, notifications, wallet freezes, and pagination.');
   } finally {
     const cleanup = db.batch();
     for (const name of ['trades', 'funding', 'ledger', 'messages', 'notifications', 'audit', 'operationReceipts']) {
-      const snapshot = await db.collection(name).where('uid', '==', uid).get();
+      const snapshot = await db.collection(name).where('uid', 'in', testClientUids).get();
       for (const doc of snapshot.docs) cleanup.delete(doc.ref);
     }
-    for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync', 'depositSettings']) cleanup.delete(db.collection(name).doc(uid));
+    for (const clientUid of testClientUids) {
+      for (const name of ['profiles', 'wallets', 'writeLimits', 'userSync', 'depositSettings']) cleanup.delete(db.collection(name).doc(clientUid));
+    }
     cleanup.delete(db.collection('staff').doc(staff.localId).collection('supportReads').doc(uid));
     if (otherStaff) cleanup.delete(db.collection('staff').doc(otherStaff.localId));
     await cleanup.commit();
-    await auth.deleteUser(uid);
+    await Promise.all(testClientUids.map(clientUid => auth.deleteUser(clientUid)));
     if (otherStaff) await auth.deleteUser(otherStaff.localId);
   }
 }
