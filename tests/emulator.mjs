@@ -58,12 +58,20 @@ async function checkInvitations(staff, trader, testClientUids) {
     return client;
   };
   const generate = kind => call(staff, 'admin.invite.refresh', { kind, requestId: randomUUID() });
+  const legacyCode = 'BONUS-' + 'Z'.repeat(20);
+  await db.collection('staff').doc(staff.localId).update({ fundedInvitationCode: legacyCode });
+  const legacyClient = await newClient();
+  assert.deepEqual((await call(legacyClient, 'access', { inviteCode: legacyCode })).wallet, { available: 200000, held: 0 });
+
   const { code: firstStandard } = await generate('standard');
+  assert.match(firstStandard, /^[A-HJ-NP-Z2-9]{8}$/);
   const request = { kind: 'funded', requestId: randomUUID() };
   const funded = await call(staff, 'admin.invite.refresh', request);
-  assert.match(funded.code, /^BONUS-[A-Z2-9]{20}$/);
+  assert.match(funded.code, /^0[A-HJ-NP-Z2-9]{7}$/);
   assert.deepEqual(await call(staff, 'admin.invite.refresh', request), funded);
   assert.equal((await call(staff, 'admin.dashboard')).invitationCode, firstStandard);
+  const retryClient = await newClient();
+  await call(retryClient, 'access', { inviteCode: legacyCode }, 400);
 
   const { code: standard } = await generate('standard');
   assert.notEqual(standard, firstStandard);
@@ -91,7 +99,6 @@ async function checkInvitations(staff, trader, testClientUids) {
   const dashboard = await call(staff, 'admin.dashboard');
   assert.equal(dashboard.invitationCode, standard);
   assert.equal(dashboard.fundedInvitationCode, replacement);
-  const retryClient = await newClient();
   await call(retryClient, 'access', { inviteCode: funded.code }, 400);
   const currentCode = { inviteCode: replacement };
   assert.deepEqual((await call(retryClient, 'access', currentCode)).wallet, { available: 200000, held: 0 });

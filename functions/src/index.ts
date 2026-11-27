@@ -7,6 +7,7 @@ import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { demoPrice, durations, findAsset, isGateAsset, profitForDuration, profitPercent } from './market';
 import { gateFeedVersion, gateTradePrice } from './gate-market';
+import { invitationCodeAlphabet, invitationCodeLength, legacyFundedCodePrefix, shortFundedCodePattern, shortFundedCodePrefix } from './invitation-codes';
 import { walletFreeze } from './wallet-freeze';
 import { withdrawalReputationWarning } from './withdrawal-reputation';
 
@@ -18,7 +19,6 @@ const region = defineString('QOPTION_REGION', { default: 'us-central1' });
 const staffSessionSeconds = 30 * 60;
 const maxAmount = 100000000;
 const invitationBonus = 200_000;
-const bonusCodePrefix = 'BONUS-';
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 type Data = Record<string, unknown>;
 type Actor = { uid: string; staff: string[]; allClients: boolean };
@@ -51,10 +51,20 @@ function cents(value: unknown, signed = false): number {
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-function generateInviteCode(length = 8) {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateInviteCode(length = invitationCodeLength) {
   const bytes = randomBytes(length);
-  return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+  return Array.from(bytes, b => invitationCodeAlphabet[b % invitationCodeAlphabet.length]).join('');
+}
+async function reserveFundedInviteCode(tx: Transaction) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = shortFundedCodePrefix + generateInviteCode(invitationCodeLength - shortFundedCodePrefix.length);
+    const reservation = db.collection('issuedFundedInvitationCodes').doc(code);
+    if ((await tx.get(reservation)).exists) continue;
+    // Keep the reservation after rotation so a replaced code can never be issued again.
+    tx.create(reservation, {});
+    return code;
+  }
+  fail('resource-exhausted', 'Could not generate a unique 2000 invitation code. Try again.');
 }
 async function bumpSync(fields: Record<string, unknown>, userUids: string[] = []) {
   const now = Date.now();
@@ -147,7 +157,8 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
   const trimmedName = nameParam?.trim().slice(0, 60);
   const trimmedInvite = inviteCodeParam?.trim().slice(0, 40);
   const normalizedInvite = trimmedInvite?.toUpperCase();
-  const fundedInvite = normalizedInvite?.startsWith(bonusCodePrefix) ? normalizedInvite : undefined;
+  const fundedInvite = normalizedInvite && (normalizedInvite.startsWith(legacyFundedCodePrefix) || shortFundedCodePattern.test(normalizedInvite))
+    ? normalizedInvite : undefined;
   const created = await db.runTransaction(async tx => {
     const [user, balance] = await Promise.all([tx.get(profile(uid)), tx.get(wallet(uid))]);
     let invitedBy = '';
@@ -814,9 +825,9 @@ async function adminInviteRefresh(user: Actor, data: Data) {
   if (kind !== 'standard' && kind !== 'funded') fail('invalid-argument', 'Choose an invitation code type.');
   const funded = kind === 'funded';
   if (funded) requireRole(user, 'admin');
-  const code = funded ? bonusCodePrefix + generateInviteCode(20) : generateInviteCode();
   const result = await mutate(user, data, 'admin.invite.refresh', [kind], async tx => {
     await checkStaff(tx, user, funded ? 'admin' : user.staff[0]);
+    const code = funded ? await reserveFundedInviteCode(tx) : generateInviteCode();
     if (funded) {
       tx.update(db.collection('staff').doc(user.uid), { fundedInvitationCode: code });
     } else {

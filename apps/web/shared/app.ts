@@ -7,6 +7,7 @@ import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, on
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, demoPrice, findAsset, isGateAsset, profitForDuration, type Asset } from '../../../functions/src/market';
 import { gateTicker } from '../../../functions/src/gate-market';
+import { legacyFundedCodePattern, shortFundedCodePattern } from '../../../functions/src/invitation-codes';
 import { walletFreeze } from '../../../functions/src/wallet-freeze';
 import { withdrawalReputationWarning } from '../../../functions/src/withdrawal-reputation';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
@@ -2535,7 +2536,7 @@ root.addEventListener('submit', async event => {
       const session = authVersion;
       const { code } = await api.call<{ code: string }>(op, { kind: card.kind, requestId: form.dataset.operationId ||= crypto.randomUUID() });
       if (authVersion !== session || !access) return;
-      if (funded && !/^BONUS-[A-Z2-9]{20}$/.test(code)) {
+      if (funded && !shortFundedCodePattern.test(code) && !legacyFundedCodePattern.test(code)) {
         throw new Error('The server did not return a valid 2000 Invitation Code. Check the Firebase Functions deployment.');
       }
       invitationRevision++;
