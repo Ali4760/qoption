@@ -2084,6 +2084,7 @@ root.addEventListener('click', async event => {
         if (!admin || route !== 'client' || id !== clientId() || (!role('admin') && !role('finance'))) break;
         const session = authVersion;
         openAdminClientReport(
+          panel(),
           period => api.call<ClientReport>('admin.client.report', { uid: id, ...period }),
           () => access && authVersion === session,
         );

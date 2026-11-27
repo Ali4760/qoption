@@ -1,6 +1,7 @@
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { ClientReport, ClientReportPeriod } from '../../../functions/src/client-report';
-import reportStyles from './admin-client-report.css?inline';
+import logoUrl from '../assets/qoption-logo.png';
+import './admin-client-report.css';
 import { credits, dateTime, errorMessage, esc } from './view';
 
 const reportTitle = 'Client Performance Report';
@@ -14,7 +15,8 @@ function presentReport(report: ClientReport) {
   const { client, period } = report;
   const from = period.from === null ? null : reportDate.format(period.from);
   const through = period.until === null ? null : reportDate.format(period.until - 1);
-  const range = from && through ? `${from} to ${through}` : from ? `Since ${from}` : through ? `Through ${through}` : 'All available activity';
+  const range = from && through ? (from === through ? from : `${from} to ${through}`)
+    : from ? `Since ${from}` : through ? `Through ${through}` : 'All available activity';
   const currency = /^[A-Z]{3}$/.test(client.currency) ? client.currency : 'INR';
   const money = (cents: number) => `${currency} ${credits(cents)}`;
   const decidedTrades = report.wins + report.losses;
@@ -50,30 +52,18 @@ function fieldsHtml(fields: Field[]) {
   return fields.map(({ label, value, tone }) => `<div><dt>${esc(label)}</dt><dd${tone ? ` class="${tone}"` : ''}>${esc(value)}</dd></div>`).join('');
 }
 
-function reportHtml(report: ClientReport) {
-  const display = presentReport(report);
-  return `<article class="report-paper">
-    <header class="report-heading">
-      <div class="report-brand">QOPTION</div>
-      <h1>${reportTitle}</h1>
-      <p>${esc(display.range)} · Generated ${esc(display.generated)}</p>
-    </header>
-    <div class="report-identity">
-      <dl>${fieldsHtml(display.client)}</dl>
-      <dl>${fieldsHtml(display.account)}</dl>
-    </div>
-    <section>
-      <h2>Financial summary</h2>
+function reportSummaryHtml(display: ReturnType<typeof presentReport>) {
+  return `<section>
+      <h4>Financial summary</h4>
       <dl class="report-metrics report-financial">${fieldsHtml(display.financial)}</dl>
       <p class="report-balance-detail">${esc(display.balanceDetail)}</p>
     </section>
     <section>
-      <h2>Account activity</h2>
+      <h4>Account activity</h4>
       <dl class="report-metrics report-activity">${fieldsHtml(display.activity)}</dl>
     </section>
-    <aside class="report-note"><h2>Statement notes</h2><p>${activityNote}</p></aside>
-    <footer>${confidentiality}</footer>
-  </article>`;
+    <aside class="report-note"><h4>Statement notes</h4><p>${activityNote}</p></aside>
+    <footer>${confidentiality}</footer>`;
 }
 
 const colors = { ink: '#17263b', muted: '#52647a', border: '#d8e0e7', green: '#117553', red: '#b62d40', soft: '#f4f8f7' };
@@ -83,7 +73,7 @@ function metricTable(fields: Field[]): Content {
     table: {
       widths: fields.map(() => '*'),
       body: [
-        fields.map(({ label }) => ({ text: label, style: 'label', fillColor: colors.soft })),
+        fields.map(({ label }) => ({ text: label, style: 'label', fillColor: colors.soft, fillOpacity: .8 })),
         fields.map(({ value, tone }) => ({
           text: value, style: 'metric', color: tone === 'positive' ? colors.green : tone === 'negative' ? colors.red : colors.ink,
         })),
@@ -96,7 +86,7 @@ function metricTable(fields: Field[]): Content {
   };
 }
 
-function reportDocument(report: ClientReport): TDocumentDefinitions {
+function reportDocument(report: ClientReport, logo: string): TDocumentDefinitions {
   const display = presentReport(report);
   const identity = (fields: Field[]) => fields.map(({ label, value }) => ({
     stack: [{ text: label, style: 'label' }, { text: value }], margin: [0, 0, 0, 8] as [number, number, number, number],
@@ -105,19 +95,28 @@ function reportDocument(report: ClientReport): TDocumentDefinitions {
     info: { title: reportTitle, author: 'Qoption' },
     pageSize: 'LETTER',
     pageMargins: [44, 44, 44, 52],
+    images: { qoptionLogo: logo },
+    background: (_page, pageSize) => ({
+      stack: [
+        { image: 'qoptionLogo', width: 76, alignment: 'center', opacity: .085, margin: [0, 0, 0, 4] },
+        { text: 'QOPTION', fontSize: 64, bold: true, alignment: 'center', color: '#21466c', opacity: .085 },
+      ],
+      margin: [0, (pageSize.height - 155) / 2, 0, 0],
+    }),
     defaultStyle: { fontSize: 10, color: colors.ink, lineHeight: 1.18 },
     styles: {
-      brand: { fontSize: 11, bold: true, color: colors.green, characterSpacing: 2 },
-      heading: { fontSize: 27, bold: true, margin: [0, 8, 0, 6] },
+      brand: { fontSize: 23, bold: true, characterSpacing: 2, alignment: 'center' },
+      heading: { fontSize: 13, bold: true, alignment: 'center', margin: [0, 8, 0, 5] },
       label: { fontSize: 9, color: colors.muted, bold: true },
       metric: { fontSize: 15, bold: true },
       section: { fontSize: 13, bold: true, margin: [0, 18, 0, 8] },
       detail: { fontSize: 9, color: colors.muted },
     },
     content: [
-      { text: 'QOPTION', style: 'brand' },
+      { image: 'qoptionLogo', width: 50, alignment: 'center', margin: [0, 0, 0, 5] },
+      { text: 'OPTION', style: 'brand' },
       { text: reportTitle, style: 'heading' },
-      { text: `${display.range} · Generated ${display.generated}`, style: 'detail', margin: [0, 0, 0, 16] },
+      { text: `${display.range} · Generated ${display.generated}`, style: 'detail', alignment: 'center', margin: [0, 0, 0, 16] },
       { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 524, y2: 0, lineColor: colors.green, lineWidth: 1.6 }], margin: [0, 0, 0, 16] },
       { columns: [{ width: '*', stack: identity(display.client) }, { width: '34%', stack: identity(display.account) }], columnGap: 20 },
       { text: 'Financial summary', style: 'section' },
@@ -144,56 +143,83 @@ function dateBoundary(date: string, end: boolean) {
   return time;
 }
 
-async function downloadReport(report: ClientReport, doc: Document, isAuthorized: () => boolean) {
-  const [{ default: pdfMake }, { default: pdfFonts }] = await Promise.all([
-    import('pdfmake/build/pdfmake'), import('pdfmake/build/vfs_fonts'),
+async function reportLogoDataUrl() {
+  const response = await fetch(logoUrl);
+  if (!response.ok) throw new Error('The Qoption logo could not be loaded. Try downloading the report again.');
+  const image = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(image);
+  });
+}
+
+async function downloadReport(report: ClientReport, host: HTMLElement, canDownload: () => boolean) {
+  const [{ default: pdfMake }, { default: pdfFonts }, logo] = await Promise.all([
+    import('pdfmake/build/pdfmake'), import('pdfmake/build/vfs_fonts'), reportLogoDataUrl(),
   ]);
+  if (!canDownload()) return;
   pdfMake.addVirtualFileSystem(pdfFonts);
-  const blob = await pdfMake.createPdf(reportDocument(report)).getBlob();
-  if (!isAuthorized() || !doc.defaultView || doc.defaultView.closed) return;
+  const blob = await pdfMake.createPdf(reportDocument(report, logo)).getBlob();
+  if (!canDownload()) return;
   const url = URL.createObjectURL(blob);
-  const link = doc.createElement('a');
+  const link = document.createElement('a');
+  link.hidden = true;
   link.href = url;
   const client = String(report.client.number ?? report.client.uid);
   link.download = `Qoption-Client-Report-${client}-${new Date(report.generatedAt).toISOString().slice(0, 10)}.pdf`;
-  doc.body.append(link);
+  host.append(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export function openAdminClientReport(load: (period: ClientReportPeriod) => Promise<ClientReport>, isAuthorized: () => boolean) {
-  const preview = window.open('', '_blank');
-  if (!preview) throw new Error('Allow pop-ups for Qoption to open the report preview.');
-  preview.opener = null;
-  const doc = preview.document;
-  doc.title = reportTitle;
-  doc.documentElement.lang = 'en';
-  const viewport = doc.createElement('meta');
-  viewport.name = 'viewport';
-  viewport.content = 'width=device-width, initial-scale=1';
-  const style = doc.createElement('style');
-  style.textContent = reportStyles;
-  doc.head.append(viewport, style);
-  doc.body.innerHTML = `<header class="report-toolbar">
-    <form id="report-period">
-      <label>Start date<input type="date" id="report-from"></label>
-      <label>End date<input type="date" id="report-through"></label>
-      <button type="submit">Load statement</button>
-    </form>
-    <button type="button" class="download-pdf" disabled>Download PDF</button>
-  </header>
-  <p id="report-status" role="status"></p>
-  <main id="report-preview"></main>`;
+export function openAdminClientReport(dialog: HTMLDialogElement, load: (period: ClientReportPeriod) => Promise<ClientReport>, isAuthorized: () => boolean) {
+  dialog.innerHTML = `<div class="client-report">
+    <header class="report-dialog-heading">
+      <h2 id="detail-heading">Client financial report</h2>
+      <button type="button" class="report-close" data-action="close" aria-label="Close report">×</button>
+    </header>
+    <div class="report-scroll">
+      <article class="report-paper">
+        <div class="report-watermark" aria-hidden="true"><img src="${esc(logoUrl)}" alt="">QOPTION</div>
+        <header class="report-heading">
+          <img class="report-logo" src="${esc(logoUrl)}" width="56" height="56" alt="Qoption logo">
+          <div class="report-brand">OPTION</div>
+          <h3>${reportTitle}</h3>
+          <p id="report-meta"></p>
+        </header>
+        <div id="report-identity" class="report-identity"></div>
+        <form id="report-period" class="report-toolbar">
+          <label>Start date<input type="date" id="report-from"></label>
+          <label>End date<input type="date" id="report-through"></label>
+          <button type="submit" class="button secondary compact">Load statement</button>
+        </form>
+        <p id="report-status" role="status"></p>
+        <div id="report-preview"></div>
+      </article>
+    </div>
+    <footer class="report-dialog-footer">
+      <p id="report-download-status" role="status"></p>
+      <button type="button" class="button secondary compact" data-action="close">Close</button>
+      <button type="button" class="button compact download-pdf" disabled>Download PDF</button>
+    </footer>
+  </div>`;
 
-  const form = doc.querySelector<HTMLFormElement>('#report-period')!;
-  const start = doc.querySelector<HTMLInputElement>('#report-from')!;
-  const end = doc.querySelector<HTMLInputElement>('#report-through')!;
+  const view = dialog.querySelector<HTMLElement>('.client-report')!;
+  const form = view.querySelector<HTMLFormElement>('#report-period')!;
+  const start = view.querySelector<HTMLInputElement>('#report-from')!;
+  const end = view.querySelector<HTMLInputElement>('#report-through')!;
   const submit = form.querySelector<HTMLButtonElement>('button')!;
-  const download = doc.querySelector<HTMLButtonElement>('.download-pdf')!;
-  const status = doc.querySelector<HTMLElement>('#report-status')!;
-  const host = doc.querySelector<HTMLElement>('#report-preview')!;
+  const download = view.querySelector<HTMLButtonElement>('.download-pdf')!;
+  const status = view.querySelector<HTMLElement>('#report-status')!;
+  const downloadStatus = view.querySelector<HTMLElement>('#report-download-status')!;
+  const meta = view.querySelector<HTMLElement>('#report-meta')!;
+  const identity = view.querySelector<HTMLElement>('#report-identity')!;
+  const host = view.querySelector<HTMLElement>('#report-preview')!;
   let snapshot: ClientReport | undefined, loadedRange = '', busy = false;
+  const isOpen = () => dialog.open && view.isConnected;
   const selectedRange = () => start.value + '/' + end.value;
   const updateButtons = () => {
     submit.disabled = busy;
@@ -213,9 +239,12 @@ export function openAdminClientReport(load: (period: ClientReportPeriod) => Prom
       const from = dateBoundary(start.value, false), until = dateBoundary(end.value, true);
       if (from !== null && until !== null && from >= until) throw new Error('The end date must be on or after the start date.');
       const report = await load({ from, until });
+      if (!isOpen()) return;
       checkSession();
-      if (preview.closed) return;
-      host.innerHTML = reportHtml(report);
+      const display = presentReport(report);
+      meta.textContent = `${display.range} · Generated ${display.generated}`;
+      identity.innerHTML = `<dl>${fieldsHtml(display.client)}</dl><dl>${fieldsHtml(display.account)}</dl>`;
+      host.innerHTML = reportSummaryHtml(display);
       snapshot = report;
       loadedRange = range;
       status.textContent = '';
@@ -232,19 +261,22 @@ export function openAdminClientReport(load: (period: ClientReportPeriod) => Prom
   download.addEventListener('click', async () => {
     if (!snapshot || busy || loadedRange !== selectedRange()) return;
     busy = true;
-    status.textContent = 'Preparing PDF…';
+    downloadStatus.textContent = 'Preparing PDF…';
     updateButtons();
     try {
       checkSession();
-      await downloadReport(snapshot, doc, isAuthorized);
+      await downloadReport(snapshot, view, () => isOpen() && isAuthorized());
+      if (!isOpen()) return;
       checkSession();
-      status.textContent = '';
+      downloadStatus.textContent = '';
     } catch (error) {
-      status.textContent = errorMessage(error);
+      downloadStatus.textContent = errorMessage(error);
     } finally {
       busy = false;
       updateButtons();
     }
   });
+  dialog.addEventListener('close', () => view.remove(), { once: true });
+  if (!dialog.open) dialog.showModal();
   void refresh();
 }
