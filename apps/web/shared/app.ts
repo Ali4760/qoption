@@ -848,6 +848,7 @@ type OverviewData = {
   invitationCode?: string;
   fundedInvitationCode?: string;
 };
+type AdminPayload = { payload: unknown; rows: Row[]; next: string | null; clientRow?: Row; invitationRevision?: number };
 type ListBundle = { rows: Row[]; next: string | null };
 
 function clientSummaryHtml(data: ClientBundle['data']) {
@@ -1147,16 +1148,12 @@ function buildAdminHtml(targetRoute: string, payload: unknown): string {
   return buildAuditHtml(rows);
 }
 
-async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ payload: unknown; rows: Row[]; next: string | null; clientRow?: Row }> {
+async function fetchAdminPayload(targetRoute: string, current: List): Promise<AdminPayload> {
   if (targetRoute === 'overview') {
     const requestedRevision = invitationRevision;
     const values = await api.call<OverviewData>('admin.dashboard');
-    const currentValues = adminCache.get('overview')?.data as OverviewData | undefined;
-    if (requestedRevision !== invitationRevision && currentValues) {
-      for (const { key } of invitationCards) values[key] = currentValues[key];
-    }
     setAdminBadges(values.deposits, values.withdrawals);
-    return { payload: values, rows: [], next: null };
+    return { payload: values, rows: [], next: null, invitationRevision: requestedRevision };
   }
   if (targetRoute === 'client') {
     const uid = clientId(), thread = clientSection() === 'messages';
@@ -1298,6 +1295,22 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
   );
 }
 
+function cacheAdminPayload(key: string, targetRoute: string, result: AdminPayload) {
+  if (targetRoute === 'overview') {
+    const values = result.payload as OverviewData;
+    const current = adminCache.get(key)?.data as OverviewData | undefined;
+    if (current) {
+      // A refresh can return an older snapshot or omit a code the server already confirmed.
+      for (const { key: codeKey } of invitationCards) {
+        if (current[codeKey] && (result.invitationRevision !== invitationRevision || !values[codeKey])) {
+          values[codeKey] = current[codeKey];
+        }
+      }
+    }
+  }
+  adminCache.set(key, { key, route: targetRoute, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
+}
+
 async function silentRefreshCurrentRoute(button?: HTMLElement) {
   if (!admin || !access || (route === 'client' && !adminClient)) return;
   if (silentRefreshActive) { silentRefreshQueued = true; return; }
@@ -1310,7 +1323,7 @@ async function silentRefreshCurrentRoute(button?: HTMLElement) {
   try {
     const result = await fetchAdminPayload(activeRoute, list());
     if (!access || activeSession !== authVersion) return;
-    adminCache.set(activeKey, { key: activeKey, route: activeRoute, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
+    cacheAdminPayload(activeKey, activeRoute, result);
     if (activeVersion === version && adminCacheKey(route) === activeKey) {
       applyCachedRows(result.rows, result.next, result.clientRow);
       if (!patchAdminDom(activeRoute, result.payload)) {
@@ -1448,7 +1461,7 @@ async function render() {
     const result = await fetchAdminPayload(route, list());
     if (run !== version || adminCacheKey() !== key) return;
     window.clearTimeout(delay);
-    adminCache.set(key, { key, route, data: result.payload, rows: result.rows, next: result.next, ts: Date.now(), dirty: false });
+    cacheAdminPayload(key, route, result);
     applyCachedRows(result.rows, result.next, result.clientRow);
     content().innerHTML = buildAdminHtml(route, result.payload);
     void markVisibleChatRead(route, result.payload);
@@ -1771,8 +1784,20 @@ root.addEventListener('click', async event => {
         const code = target.dataset.code;
         const card = invitationCards.find(item => item.kind === id);
         if (!card || !code) break;
-        await navigator.clipboard.writeText(code);
-        toast(card.title + ' copied.');
+        try {
+          await navigator.clipboard.writeText(code);
+          toast(card.title + ' copied.');
+        } catch {
+          const displayedCode = target.closest('[data-invite-kind]')?.querySelector('[data-invite-code]');
+          const selection = window.getSelection();
+          if (displayedCode && selection) {
+            const range = document.createRange();
+            range.selectNodeContents(displayedCode);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+          toast('Clipboard access is unavailable. Copy the displayed code manually.');
+        }
         break;
       }
       case 'refresh-invite': {
@@ -2502,18 +2527,23 @@ root.addEventListener('submit', async event => {
     if (op === 'admin.invite.refresh') {
       const card = invitationCards.find(item => item.kind === values.kind);
       if (!card) return;
+      const overview = adminCache.get('overview')?.data as OverviewData | undefined;
+      const funded = card.kind === 'funded';
+      if (funded && typeof overview?.fundedInvitationCode !== 'string') {
+        throw new Error('Update Firebase Functions to generate a 2000 Invitation Code.');
+      }
       const session = authVersion;
       const { code } = await api.call<{ code: string }>(op, { kind: card.kind, requestId: form.dataset.operationId ||= crypto.randomUUID() });
       if (authVersion !== session || !access) return;
+      if (funded && !/^BONUS-[A-Z2-9]{20}$/.test(code)) {
+        throw new Error('The server did not return a valid 2000 Invitation Code. Check the Firebase Functions deployment.');
+      }
       invitationRevision++;
       const cached = adminCache.get('overview');
       if (cached) (cached.data as OverviewData)[card.key] = code;
-      invalidateAdminCache(['overview', 'audit']);
+      invalidateAdminCache(['audit']);
       if (form.isConnected && panel().open) panel().close();
-      if (route === 'overview') {
-        updateInvitationCard(card.kind, code);
-        void silentRefreshCurrentRoute();
-      }
+      if (route === 'overview') updateInvitationCard(card.kind, code);
       toast(card.title + ' generated.');
       return;
     }
