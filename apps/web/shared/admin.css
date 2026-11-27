@@ -164,25 +164,6 @@
   letter-spacing: .02em;
 }
 
-/* ─── Top bar ─────────────────────────────────────────────── */
-.admin-shell .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  min-height: 64px;
-  padding-inline: var(--admin-gutter);
-  border-color: var(--admin-line);
-  background: rgba(8, 14, 24, .96);
-  backdrop-filter: blur(8px);
-}
-
-.admin-shell .topbar .top-title {
-  color: #c8ddef;
-  font-size: .91rem;
-  font-weight: 600;
-}
-
-.admin-shell .top-actions .pill { font-size: .73rem; }
 .admin-shell .workspace-menu-dismiss { display: none; }
 
 /* ─── Content area ────────────────────────────────────────── */
@@ -299,6 +280,7 @@
 
 /* ─── Invite code card ───────────────────────────────────── */
 .admin-shell .admin-invite {
+  --invite-accent: var(--admin-orange);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -317,13 +299,17 @@
   color: #edf5ff;
 }
 
+.admin-shell .admin-invite-copy {
+  flex: 1 1 220px;
+}
+
 .admin-shell .admin-invite p {
   color: var(--admin-muted);
   font-size: .86rem;
   margin: 0;
 }
 
-.admin-shell .admin-invite-right {
+.admin-shell .admin-invite-controls {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -331,9 +317,9 @@
   min-width: 0;
 }
 
-.admin-shell .admin-invite-right code {
+.admin-shell .admin-invite-controls code {
   max-width: 100%;
-  color: var(--admin-orange);
+  color: var(--invite-accent);
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: .12em;
@@ -344,16 +330,19 @@
 .admin-shell .admin-invite-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.admin-shell .invite-icon-btn {
+.admin-shell .invite-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
+  min-height: 36px;
+  padding-inline: 10px;
+  gap: 6px;
+  font-size: .8rem;
+  font-weight: 650;
   border-radius: 9px;
   border: 1px solid #24384e;
   background: #0d1826;
@@ -362,10 +351,37 @@
   transition: background .16s ease, border-color .16s ease, color .16s ease;
 }
 
-.admin-shell .invite-icon-btn:hover {
+.admin-shell .invite-btn:not(:disabled):hover {
   background: #17293f;
   border-color: #3d5f82;
   color: #fff;
+}
+
+.admin-shell .invite-copy-btn:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.admin-shell .admin-invite[data-invite-kind="funded"] {
+  --invite-accent: var(--admin-green);
+  margin-top: 14px;
+  border-color: var(--admin-green-border);
+  background: linear-gradient(135deg, #102824 0%, #0b1522 75%);
+}
+
+.admin-shell .admin-invite[data-invite-kind="funded"] .admin-invite-copy {
+  order: 1;
+  text-align: right;
+}
+
+.admin-shell .admin-invite[data-invite-kind="funded"] .admin-invite-controls {
+  align-items: flex-start;
+}
+
+.admin-shell .admin-invite[data-invite-kind="funded"] .invite-copy-btn {
+  color: var(--admin-green);
+  border-color: var(--admin-green-border);
+  background: var(--admin-green-tint);
 }
 
 .admin-shell .refresh-btn {
@@ -711,28 +727,11 @@
     --admin-gutter: 13px;
   }
 
-  .admin-shell .topbar {
-    min-height: 57px;
-    gap: 7px;
-    padding-inline: 12px;
-  }
-
-  .admin-shell .top-actions { gap: 6px; }
-
-  .admin-shell .top-actions .pill {
-    font-size: .64rem;
-    padding: 4px 6px;
-  }
-
-  .admin-shell .top-actions .button,
   .admin-shell .menu-toggle {
-    min-height: 36px;
-    padding-inline: 8px;
-    white-space: nowrap;
+    margin: 12px var(--admin-gutter) 0;
   }
 
   .admin-shell .sidebar {
-    top: 57px;
     bottom: 0;
     height: auto;
     width: min(84vw, 250px);
@@ -741,7 +740,7 @@
   .admin-shell:has(.sidebar.open) .workspace-menu-dismiss {
     display: block;
     position: fixed;
-    inset: 57px 0 0;
+    inset: 0;
     z-index: 3;
     margin: 0;
     padding: 0;
@@ -776,9 +775,13 @@
 
   .admin-shell .admin-invite { padding: 16px; }
 
-  .admin-shell .admin-invite-right {
-    align-items: flex-start;
+  .admin-shell .admin-invite-controls {
     width: 100%;
+  }
+
+  .admin-shell .admin-invite[data-invite-kind="funded"] .admin-invite-copy {
+    order: 0;
+    text-align: left;
   }
 
   .admin-shell :is(.panel-heading, .panel-body, .filters, .pagination) {
@@ -809,7 +812,6 @@
 }
 
 @media (max-width: 380px) {
-  .admin-shell .top-actions .pill { display: none; }
   .admin-shell .admin-client-identity dl { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .admin-shell .admin-client-identity dd + dt { margin-top: 7px; }
 }

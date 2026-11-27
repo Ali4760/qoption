@@ -120,17 +120,12 @@
   border-color: rgba(148, 178, 208, 0.32);
 }
 
-#app-interface .asset-pill-dot {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 8px;
-  font-weight: 900;
-  color: #04120d;
-  background: #f7931a;
-  flex-shrink: 0;
+#app-interface .coin-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  vertical-align: middle;
 }
 
 #app-interface #headerAsset {
@@ -217,25 +212,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-#app-interface .balance-display:has(.balance-freeze-badge) {
+#app-interface .balance-display:has(.balance-label[data-freeze]) {
   border-color: rgba(126, 211, 255, 0.55);
   background: linear-gradient(140deg, #102438, #17344a);
   box-shadow: inset 0 0 10px rgba(126, 211, 255, 0.14);
 }
-#app-interface .balance-display:has(.balance-freeze-badge) :is(.balance-label, .balance-val) {
+#app-interface .balance-display:has(.balance-label[data-freeze]) :is(.balance-label, .balance-val) {
   color: #d2f1ff;
 }
-#app-interface .balance-freeze-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: #7ed3ff;
-  font-size: 9px;
-  font-weight: 700;
+#app-interface .balance-label[data-freeze] {
+  align-self: stretch;
+  contain: inline-size;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
 }
-#app-interface .balance-freeze-badge svg {
-  width: 11px;
-  height: 11px;
+#app-interface .balance-label[data-freeze="withdrawals"] {
+  font-size: 8px;
+  line-height: 10.35px;
 }
 
 /* ---------- Desktop Left Icon Rail ---------- */
@@ -397,17 +391,6 @@
   gap: 11px;
 }
 
-#app-interface .chart-symbol-mark {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid rgba(31, 214, 164, 0.34);
-  background: rgba(31, 214, 164, 0.12);
-  color: #5eefc4;
-}
-
 #app-interface .chart-market-name {
   font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
   color: #f4f8fc;
@@ -477,24 +460,6 @@
 }
 #app-interface:not(.market-active) .chart-mode-toggle {
   display: none;
-}
-
-@media (max-width: 375px) {
-  #app-interface .top-bar:has(.balance-freeze-badge) .asset-btn-desk {
-    padding-inline: 5px;
-  }
-  #app-interface .top-bar:has(.balance-freeze-badge) #headerAsset {
-    display: none;
-  }
-  #app-interface .top-bar:has(.balance-freeze-badge) .balance-group {
-    gap: 4px;
-  }
-  #app-interface .top-bar:has(.balance-freeze-badge) .balance-display {
-    padding-inline: 7px;
-  }
-  #app-interface .top-bar:has(.balance-freeze-badge) .hdr-ico {
-    width: 28px;
-  }
 }
 
 @media (max-width: 420px) {
@@ -1173,6 +1138,20 @@
   font-weight: 800;
   color: #ffffff;
   margin-top: 3px;
+}
+#app-interface .prof-reputation-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--iq-green);
+}
+#app-interface .prof-reputation-warning {
+  min-width: 0;
+  color: var(--iq-accent);
+  font-size: 10px;
+  line-height: 1;
+  text-align: right;
 }
 
 /* ---------- History Pages (Transaction History & Screenshot 7 Trade History) ---------- */

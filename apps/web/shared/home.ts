@@ -4,6 +4,7 @@ import './home.css';
 import { finishStartup } from './startup';
 import { assets, type Asset } from '../../../functions/src/market';
 import { formatPrice, mountChart, timeframes, type ChartMode } from './canvas-chart';
+import { coinIcon, coinLogoUrls } from './coin-icons';
 
 type Quote = { last: number; open: number; high: number; change: number };
 type QuoteRow = { symbol: string; lastPrice?: string; openPrice?: string; highPrice?: string; priceChangePercent?: string };
@@ -16,6 +17,7 @@ const feedStatus = document.querySelector<HTMLElement>('#home-feed-status')!;
 const canvas = document.querySelector<HTMLCanvasElement>('#home-market-chart')!;
 const pairName = document.querySelector<HTMLElement>('#home-market-title')!;
 const marketName = document.querySelector<HTMLElement>('#home-market-name')!;
+const marketLogo = document.querySelector<HTMLImageElement>('#home-market-logo')!;
 const latest = document.querySelector<HTMLElement>('#home-live-price')!;
 const open = document.querySelector<HTMLElement>('#home-open')!;
 const high = document.querySelector<HTMLElement>('#home-high')!;
@@ -43,7 +45,8 @@ function setChange(node: HTMLElement, value: number | undefined) {
 
 list.innerHTML = watchlist.map(asset => '<button type="button" class="home-market-row" data-symbol="' + asset.symbol + '" aria-label="Select ' +
   asset.name + '" aria-pressed="' + (asset === current) + '">' +
-  '<span class="home-market-pair"><strong>' + asset.code + '/USDT</strong><small>' + asset.name + '</small></span>' +
+  '<span class="home-market-identity">' + coinIcon(asset.code, 23) +
+  '<span class="home-market-pair"><strong>' + asset.code + '/USDT</strong><small>' + asset.name + '</small></span></span>' +
   '<span class="home-market-value"><strong data-role="quote-price">—</strong><small data-role="quote-change">—</small></span></button>').join('');
 
 function showStatistics() {
@@ -66,6 +69,7 @@ function chooseMarket(asset: Asset) {
   current = asset;
   pairName.textContent = current.code + '/USDT';
   marketName.textContent = current.name;
+  marketLogo.src = coinLogoUrls[current.code];
   updateChartLabel();
   const price = quotes.get(current.symbol)?.last;
   latest.textContent = price !== undefined ? formatPrice(price) : '—';

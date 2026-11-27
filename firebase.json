@@ -20,6 +20,8 @@
   "hosting": {
     "site": "qoption-6c226",
     "public": "dist",
+    "cleanUrls": true,
+    "trailingSlash": false,
     "ignore": [
       "**/.*",
       "**/node_modules/**"
@@ -51,7 +53,7 @@
         ]
       },
       {
-        "source": "/assets/**",
+        "regex": "^[/\\\\]assets[/\\\\].+",
         "headers": [
           {
             "key": "Cache-Control",
@@ -69,8 +71,12 @@
     ],
     "rewrites": [
       {
-        "source": "/admin/**",
-        "destination": "/admin/index.html"
+        "regex": "^[/\\\\](trade([/\\\\]assets)?|assets|transactions|history|leaderboard|settings)[/\\\\]?$",
+        "destination": "/login.html"
+      },
+      {
+        "regex": "^[/\\\\]advin[/\\\\](dashboard|clients([/\\\\][^/\\\\]+([/\\\\]messages)?)?|withdrawals|deposits|trades|audit)[/\\\\]?$",
+        "destination": "/advin.html"
       },
       {
         "source": "**",

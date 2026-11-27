@@ -5,19 +5,22 @@ import './admin.css';
 import './client-replica.css';
 import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, onAuthStateChanged, sendEmailVerification, sendPasswordResetEmail,
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
-import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
+import { assets, demoPrice, findAsset, isTradableAsset, type Asset } from '../../../functions/src/market';
 import { walletFreeze } from '../../../functions/src/wallet-freeze';
+import { withdrawalReputationWarning } from '../../../functions/src/withdrawal-reputation';
 import { connect, emulator, rememberPreference, setRememberPreference } from './firebase';
 import { userLogin } from './login';
+import { coinLogoUrls } from './coin-icons';
 import { finishStartup, showStartup } from './startup';
+import { adminClientPath, adminPath, adminRouteForPath, clientPaths, clientTabForPath, workspaceEntryPath } from './workspace-routes';
 import { depositSettingsChanges, depositSettingsForm } from './admin-deposit';
-import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, brandContent, chartFrames, ledgerRows, messages, messageThread, pair, title, userNav } from './screens';
+import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, chartFrames, ledgerRows, messages, messageThread, pair, title, userNav } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type DepositSettings, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
-  clientChartPresentation, clientIcons, clientNavItems, clientWithdrawalRestriction, coinIcon, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
+  clientChartPresentation, clientIcons, clientWithdrawalRestriction, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
   fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml,
-  renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderTxnDetailHtml,
+  renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderReputationValue, renderTradePair, renderTxnDetailHtml,
   updateNotifBanners, validateBankDetails, type ClientState,
 } from './client-ui';
 
@@ -29,7 +32,10 @@ let person: User | null;
 let home: Home | undefined;
 let roles: string[] = [];
 let access = false, version = 0, authVersion = 0, clockOffset = 0;
+let adminSessionExpiresAt = 0, adminSessionTimer = 0;
+let adminSignInNotice = '';
 let route = first, selected: Asset = assets[0], frame = '1m';
+let adminLocation = adminRouteForPath(location.pathname);
 let chart: ReturnType<typeof import('./canvas-chart').mountChart> | undefined;
 let refreshTimer = 0, toastTimer = 0, quoteTimer = 0, activeTradeInt = 0, tradeSettling = false;
 let registration = !admin && new URLSearchParams(location.search).get('mode') === 'register';
@@ -41,7 +47,7 @@ const lists = new Map<string, List>();
 type CachedAdminView = { key: string; route: string; data: unknown; rows: Row[]; next: string | null; ts: number; dirty: boolean };
 const adminCache = new Map<string, CachedAdminView>();
 const CACHE_TTL = 60_000;
-const CLIENTS_PAGE_SIZE = 25;
+const ADMIN_TABLE_PAGE_SIZE = 25;
 const CLIENT_IDLE_MS = 10 * 60_000;
 const CLIENT_ACTIVITY_SYNC_MS = 30_000;
 let clientActivityTimer = 0;
@@ -88,12 +94,9 @@ const clientState: ClientState = {
 
 const role = (name: string) => roles.includes(name);
 const nav = () => admin ? adminNav.filter(item => !item[3] || role(item[3])) : userNav;
-const part = (i: number) => {
-  try { return decodeURIComponent(location.hash.slice(1).split('/')[i] || ''); } catch { return ''; }
-};
-const clientId = () => part(1);
+const clientId = () => adminLocation.uid;
 const canChat = () => role('admin') || role('support');
-const clientSection = () => canChat() && part(2) === 'messages' ? 'messages' : 'activity';
+const clientSection = () => canChat() && adminLocation.messages ? 'messages' : 'activity';
 const content = () => root.querySelector<HTMLElement>('#content')!;
 const panel = () => root.querySelector<HTMLDialogElement>('#details')!;
 const routeName = () => nav().find(item => item[0] === route)?.[2] || 'Client details';
@@ -128,7 +131,13 @@ const stopSync = () => {
   clientState.depositReferenceNumber = '';
   clientState.chartMode = 'candles';
 };
-const go = (target: string) => { if (location.hash === '#' + target) void render(); else location.hash = target; };
+function replaceWorkspacePath(path: string) {
+  if (location.pathname !== path || location.hash) history.replaceState(history.state, '', path + location.search);
+}
+function go(path: string) {
+  if (location.pathname !== path) history.pushState(null, '', path);
+  void render();
+}
 const cents = (value: unknown) => Math.round(Number(value) * 100);
 function list(): List {
   const key = route + (route === 'client' ? ':' + clientId() + ':' + clientSection() : '');
@@ -140,6 +149,7 @@ function list(): List {
 }
 function resetList() { Object.assign(list(), { page: 0, next: null, cursors: [null] }); }
 const navigation = () => pager(list().page, list().next);
+const firstRowNumber = () => list().page * ADMIN_TABLE_PAGE_SIZE + 1;
 function adminCacheKey(targetRoute = route) {
   const current = list();
   if (targetRoute === 'overview') return 'overview';
@@ -177,7 +187,10 @@ function updateWithdrawalRestriction(value: Home) {
   warning.textContent = restriction;
   warning.hidden = !restriction;
   const submit = root.querySelector<HTMLButtonElement>('#wdFormView button[type="submit"]');
-  if (submit) submit.disabled = Boolean(restriction || submit.form?.dataset.busy);
+  if (submit) {
+    submit.disabled = Boolean(restriction || submit.form?.dataset.busy);
+    submit.formNoValidate = Boolean(withdrawalReputationWarning(value.profile.reputationScore));
+  }
 }
 
 function setHome(value: Home) {
@@ -205,6 +218,11 @@ function setHome(value: Home) {
     if (assets.innerHTML !== html) assets.innerHTML = html;
   }
   updateWithdrawalRestriction(value);
+  const reputation = root.querySelector('#dispRep');
+  if (reputation) {
+    const html = renderReputationValue(value.profile.reputationScore);
+    if (reputation.innerHTML !== html) reputation.innerHTML = html;
+  }
   if (value.profile.savedBank && !Object.keys(clientState.bankDraft).length) {
     clientState.bankCountry = value.profile.savedBank.country || 'India';
     clientState.bankDraft = { ...value.profile.savedBank };
@@ -274,7 +292,7 @@ function authNotice(message: string) {
 function navigationLink([id, icon, name]: string[]) {
   const badge = admin && (id === 'withdrawals' || id === 'deposits')
     ? '<span class="nav-badge" id="nav-badge-' + id + '" hidden>0</span>' : '';
-  return '<a href="#' + id + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span><span class="nav-text">' + name + '</span>' + badge + '</a>';
+  return '<a href="' + adminPath(id) + '" data-nav="' + id + '"><span class="nav-symbol" aria-hidden="true">' + icon + '</span><span class="nav-text">' + name + '</span>' + badge + '</a>';
 }
 
 function setAdminBadges(deposits: unknown, withdrawals: unknown) {
@@ -318,7 +336,10 @@ function updateClientQuoteDisplays() {
   const coinGrid = root.querySelector<HTMLElement>('#coinGrid');
   if (coinGrid) coinGrid.innerHTML = gridItems;
   const ob = root.querySelector<HTMLElement>('#orderBookList');
-  if (ob) ob.innerHTML = renderOrderBookHtml(clientState.livePrice);
+  if (ob) {
+    if (isTradableAsset(clientState.selected)) ob.innerHTML = renderOrderBookHtml(clientState.livePrice);
+    else ob.textContent = 'Market data unavailable';
+  }
   const blindPrice = root.querySelector<HTMLElement>('#blindPrice');
   if (blindPrice && clientState.livePrice > 0) {
     blindPrice.textContent = clientState.livePrice < 1 ? clientState.livePrice.toFixed(5) : clientState.livePrice.toFixed(4);
@@ -328,7 +349,7 @@ function updateClientQuoteDisplays() {
 async function fetchLiveMarketQuotes() {
   if (admin || !access) return;
   try {
-    const syms = assets.map(a => a.symbol);
+    const syms = assets.filter(isTradableAsset).map(a => a.symbol);
     const url = 'https://data-api.binance.vision/api/v3/ticker/24hr?symbols=' + encodeURIComponent(JSON.stringify(syms));
     const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
     if (!res.ok) return;
@@ -423,7 +444,7 @@ function startActiveTradeCountdown(trade: { id: string; symbol: string; directio
   card.innerHTML = `
     <h5 style="color:#fff;margin:0 0 18px;font-weight:800;letter-spacing:.06em;">TRADE ACTIVE</h5>
     <div class="blind-label">ASSET</div>
-    <div class="blind-val">${esc(formatPair(trade.symbol))}</div>
+    <div class="blind-val">${renderTradePair(trade.symbol)}</div>
     <div class="blind-label">DIRECTION</div>
     <div class="blind-val" style="color:${isUp ? 'var(--iq-green)' : 'var(--iq-red)'};">${isUp ? 'BUY' : 'SELL'}</div>
     <div class="blind-timer" id="blindTimer">00:00</div>
@@ -468,7 +489,7 @@ function startActiveTradeCountdown(trade: { id: string; symbol: string; directio
           resultCard.innerHTML = `
             <h5 style="color:var(--iq-muted);margin:0 0 12px;font-weight:800;">TRADE RESULT</h5>
             <h1 style="font-weight:900;color:${color};margin:0 0 8px;font-size:34px;">${esc(fmtSignedMoney(pnl, home))}</h1>
-            <div style="font-weight:800;margin-bottom:20px;color:#fff;">${esc(formatPair(String(settled.symbol || trade.symbol)))}</div>
+            <div style="font-weight:800;margin-bottom:20px;color:#fff;">${renderTradePair(String(settled.symbol || trade.symbol))}</div>
             <button type="button" class="replica-primary-btn" data-action="client-close-result">CONTINUE</button>`;
         } else {
           resultOverlay?.classList.remove('open');
@@ -635,10 +656,9 @@ function shell() {
   const dismissMenu = '<button type="button" class="workspace-menu-dismiss" data-action="dismiss-menu" tabindex="-1" aria-label="Close navigation"></button>';
   root.innerHTML = '<div class="shell admin-shell"><aside class="sidebar" id="sidebar">' + brand +
     '<nav class="navigation" aria-label="Staff navigation">' + navigation +
-    '</nav></aside>' + dismissMenu + '<div class="work"><header class="topbar">' +
+    '</nav></aside>' + dismissMenu + '<div class="work">' +
     '<button type="button" class="button secondary compact menu-toggle" data-action="menu" aria-controls="sidebar" aria-expanded="false">Menu</button>' +
-    '<span class="brand mobile-brand" role="img" aria-label="Qoption">' + brandContent + '</span><span class="top-title" id="workspace-location">' +
-    'Admin dashboard</span></header><main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
+    '<main id="content" class="content"></main></div></div>' + dialogShell + '<p id="toast" class="toast" role="status"></p>';
 }
 function startRealtimeSync() {
   if (!api || !person) return;
@@ -725,22 +745,60 @@ function noteClientActivity(event?: Event) {
   else reportClientActivity();
 }
 
+function resetWorkspaceSession(user: User | null) {
+  authVersion++;
+  version++;
+  stop();
+  stopSync();
+  window.clearTimeout(adminSessionTimer);
+  adminSessionTimer = 0;
+  adminSessionExpiresAt = 0;
+  access = false;
+  home = undefined;
+  roles = [];
+  lists.clear();
+  visibleRows.clear();
+  person = user;
+  resolver = undefined;
+  secret = undefined;
+}
+
+function expireAdminSession() {
+  if (!admin || !person) return;
+  adminSignInNotice = 'Your admin session ended. Sign in again.';
+  resetWorkspaceSession(null);
+  showAuth(adminSignInNotice);
+  void finishStartup(root);
+  void signOut(api.auth).catch(() => { /* The workspace and its cached data have been cleared. */ });
+}
+
 async function start() {
+  replaceWorkspacePath(workspaceEntryPath(location, admin ? adminNav : undefined));
   try {
-    api = await connect(admin ? 'admin' : 'user');
+    api = await connect(admin ? 'admin' : 'user', expireAdminSession);
     onAuthStateChanged(api.auth, async user => {
-      const latest = ++authVersion;
-      version++; stop(); stopSync(); access = false; home = undefined; roles = []; lists.clear(); visibleRows.clear();
-      person = user; resolver = undefined; secret = undefined;
-      if (!user) { showAuth(); void finishStartup(root); return; }
+      resetWorkspaceSession(user);
+      const latest = authVersion;
+      if (!user) {
+        showAuth(adminSignInNotice);
+        adminSignInNotice = '';
+        void finishStartup(root);
+        return;
+      }
       showStartup(root);
       root.replaceChildren();
       try {
         if (admin) {
-          const data = await api.call<{ roles: string[]; serverTime?: number }>('admin.access');
+          const data = await api.call<{ roles: string[]; serverTime?: number; sessionExpiresAt?: number }>('admin.access');
           if (latest !== authVersion) return;
           roles = data.roles;
           clockOffset = (data.serverTime ?? Date.now()) - Date.now();
+          adminSessionExpiresAt = data.sessionExpiresAt ?? 0;
+          if (adminSessionExpiresAt) {
+            const remaining = adminSessionExpiresAt - (Date.now() + clockOffset);
+            if (remaining <= 0) { expireAdminSession(); return; }
+            adminSessionTimer = window.setTimeout(expireAdminSession, remaining);
+          }
         } else {
           const data = await api.call<Home>('access');
           if (latest !== authVersion) return;
@@ -769,6 +827,7 @@ type OverviewData = {
   deposits: number;
   withdrawals: number;
   invitationCode?: string;
+  fundedInvitationCode?: string;
 };
 type ListBundle = { rows: Row[]; next: string | null };
 
@@ -794,7 +853,7 @@ function clientActivityBodyHtml(uid: string, data: ClientBundle['data'], page: P
 function buildClientDetailHtml(bundle: ClientBundle) {
   const uid = clientId(), { data, page } = bundle;
   return '<div id="client-detail-head">' + title(data.profile.name, data.profile.email) + '</div>' +
-    '<div class="button-row admin-client-actions"><a class="button secondary compact" href="#clients">Back to clients</a>' +
+    '<div class="button-row admin-client-actions"><a class="button secondary compact" href="' + adminPath('clients') + '" data-nav="clients">Back to clients</a>' +
     (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') +
     (role('finance') ? actionButton('adjustment', uid, 'Adjust credits') : '') + '</div>' +
     '<div class="admin-client-summary" id="client-summary-panel">' + clientSummaryHtml(data) + '</div>' +
@@ -809,26 +868,55 @@ const overviewCards = [
   ['withdrawals', 'Pending withdrawals'],
 ] as const;
 
-function buildOverviewHtml(values: OverviewData) {
-  const inviteCode = values.invitationCode || '';
-  const inviteCard = '<section class="panel admin-invite"><div class="admin-invite-copy"><h2>Client Invitation Code</h2>' +
-    '<p>Share this code with new clients to register under your management.</p></div><div class="admin-invite-right"><code id="invite-code">' + esc(inviteCode) + '</code>' +
+const invitationCards = [
+  { kind: 'standard', key: 'invitationCode', title: 'Client Invitation Code', copy: 'Copy code', description: 'Share this code with new clients to register under your management.' },
+  { kind: 'funded', key: 'fundedInvitationCode', title: '2000 Invitation Code', copy: 'Copy 2000 code', description: 'Automatically adds ₹2,000 to a new client’s balance at registration.' },
+] as const;
+
+function invitationCardHtml(card: typeof invitationCards[number], code: string) {
+  return '<section class="panel admin-invite" data-invite-kind="' + card.kind + '"><div class="admin-invite-copy"><h2>' +
+    card.title + '</h2><p>' + card.description + '</p></div>' +
+    '<div class="admin-invite-controls"><code data-invite-code>' + esc(code || 'No code generated') + '</code>' +
     '<div class="admin-invite-actions">' +
-    '<button type="button" class="invite-icon-btn refresh-btn" data-action="refresh-invite" title="Generate new invitation code" aria-label="Generate new invitation code">' + adminActionIcons.refresh + '</button>' +
-    '<button type="button" class="invite-icon-btn" data-action="copy-invite" data-code="' + esc(inviteCode) + '" title="Copy invitation code" aria-label="Copy invitation code">' + adminActionIcons.copy + '</button>' +
+    '<button type="button" class="invite-btn refresh-btn" data-action="refresh-invite" data-id="' + card.kind + '" aria-label="Generate new ' +
+    card.title + '">' + adminActionIcons.refresh + '<span>Generate</span></button>' +
+    '<button type="button" class="invite-btn invite-copy-btn" data-action="copy-invite" data-id="' + card.kind + '" data-code="' + esc(code) + '"' +
+    (code ? '' : ' disabled') + '>' + adminActionIcons.copy + '<span>' + card.copy + '</span></button>' +
     '</div></div></section>';
+}
+
+function updateInvitationCard(kind: string, code: string) {
+  const card = root.querySelector('[data-invite-kind="' + kind + '"]');
+  const codeEl = card?.querySelector('[data-invite-code]');
+  const copyBtn = card?.querySelector<HTMLButtonElement>('[data-action="copy-invite"]');
+  if (!codeEl || !copyBtn) return;
+  const label = code || 'No code generated';
+  if (codeEl.textContent !== label) codeEl.textContent = label;
+  copyBtn.dataset.code = code;
+  copyBtn.disabled = !code;
+}
+
+function buildOverviewHtml(values: OverviewData) {
+  const cards = invitationCards.filter(card => card.kind === 'standard' || role('admin'));
   return title('Admin dashboard', 'Monitor accounts, orders, and requests in your staff scope.') + '<div class="admin-overview-grid">' +
     overviewCards.map(([key, name]) => {
       const allowed = nav().some(item => item[0] === key);
       const tag = allowed ? 'a' : 'article';
-      return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="#' + key + '"' : '') + '><small>' + name + '</small><strong data-metric="' + key + '">' +
+      return '<' + tag + ' class="metric admin-metric"' + (allowed ? ' href="' + adminPath(key) + '" data-nav="' + key + '"' : '') + '><small>' + name + '</small><strong data-metric="' + key + '">' +
         Number(values[key] || 0).toLocaleString() + '</strong><span class="admin-metric-foot">' + (allowed ? 'View ' + key + ' ↗' : 'Current total') +
         '</span></' + tag + '>';
-    }).join('') + '</div>' + inviteCard;
+    }).join('') + '</div>' + cards.map(card => invitationCardHtml(card, values[card.key] || '')).join('');
 }
 
 function clientStatusHtml(row: Row, now = Date.now() + clockOffset) {
-  if (row.frozen === true) return '<span class="status-frozen">FROZEN</span>';
+  const freeze = walletFreeze(Number(row.balance ?? 0), {
+    frozen: row.frozen,
+    freezeAmount: row.freezeAmount,
+    frozenAmount: row.frozenAmount,
+  });
+  if (freeze.kind === 'account') return '<span class="status-frozen">FROZEN</span>';
+  if (freeze.kind === 'amount') return '<span class="status-frozen">AMOUNT FROZEN</span>';
+  if (freeze.kind === 'withdrawals') return '<span class="status-frozen">WITHDRAWALS FROZEN</span>';
   if (!row.tradeEnabled || !row.withdrawalEnabled) return '<span class="status-inactive">SUSPENDED</span>';
   const lastActiveAt = Number(row.lastActiveAt || 0);
   if (!lastActiveAt || now - lastActiveAt > CLIENT_IDLE_MS) return '<span class="status-idle">IDLE</span>';
@@ -882,7 +970,7 @@ function clientRowHtml(row: Row, index: number, startId: number) {
   '</tr>';
 }
 function buildClientsHtml(rows: Row[]) {
-  const { search, page } = list(), startId = page * CLIENTS_PAGE_SIZE + 1;
+  const { search } = list(), startId = firstRowNumber();
   return '<div class="clients-page-header"><h1 class="clients-title">My Clients</h1>' +
     '<div class="clients-controls">' +
     '<form class="clients-search-form" data-form="search">' +
@@ -899,13 +987,12 @@ function buildClientsHtml(rows: Row[]) {
     '<div id="table-pager">' + navigation() + '</div></section>';
 }
 
-function fundingRowCells(row: Row, index: number, total: number, isWithdrawal: boolean) {
-  const fundId = '#' + ((isWithdrawal ? 2000 : 3000) + total - index);
+function fundingRowCells(row: Row, rowNumber: number) {
   const clientName = String(row.clientName || recordReference(row.uid));
   const clientEmail = String(row.clientEmail || '');
   const statusVal = String(row.status || 'pending');
   return [
-    esc(fundId),
+    '#' + rowNumber,
     '<strong class="client-name">' + esc(clientName) + '</strong>' + (clientEmail ? '<div class="client-email">' + esc(clientEmail) + '</div>' : ''),
     '₹' + credits(row.amount),
     dateTime(row.createdAt),
@@ -915,8 +1002,8 @@ function fundingRowCells(row: Row, index: number, total: number, isWithdrawal: b
     (statusVal === 'pending' ? '<button type="button" class="icon-action-btn reject-btn" data-action="reject-funding" data-id="' + esc(row.id) + '" data-name="' + esc(clientName) + '" title="Reject">✗</button>' : ''),
   ];
 }
-function fundingRowHtml(row: Row, index: number, total: number, isWithdrawal: boolean) {
-  const c = fundingRowCells(row, index, total, isWithdrawal);
+function fundingRowHtml(row: Row, rowNumber: number) {
+  const c = fundingRowCells(row, rowNumber);
   return '<tr data-row-id="' + esc(row.id) + '">' +
     '<td class="client-id-cell">' + c[0] + '</td>' +
     '<td class="client-detail-cell">' + c[1] + '</td>' +
@@ -928,6 +1015,7 @@ function fundingRowHtml(row: Row, index: number, total: number, isWithdrawal: bo
 }
 function buildFundingHtml(rows: Row[], isWithdrawal: boolean) {
   const status = list().status;
+  const start = firstRowNumber();
   const heading = isWithdrawal ? 'Withdrawal History' : 'Deposit History';
   const emptyTitle = isWithdrawal ? 'No withdrawal requests' : 'No deposit requests';
   const refreshBtn = '<button type="button" class="button secondary compact refresh-btn" data-action="reload">' + adminActionIcons.refresh + '<span>Refresh</span></button>';
@@ -938,14 +1026,13 @@ function buildFundingHtml(rows: Row[], isWithdrawal: boolean) {
       '<option value="' + value + '"' + (value === status ? ' selected' : '') + '>' + label(value) + '</option>').join('') + '</select></label>' +
     '</div>' +
     '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
-    '<thead><tr><th>ID</th><th>CLIENT</th><th>AMOUNT</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>' +
-    '<tbody id="funding-tbody">' + rows.map((row, i) => fundingRowHtml(row, i, rows.length, isWithdrawal)).join('') + '</tbody></table></div>' +
+    '<thead><tr><th>NO.</th><th>CLIENT</th><th>AMOUNT</th><th>DATE</th><th>STATUS</th><th>ACTIONS</th></tr></thead>' +
+    '<tbody id="funding-tbody">' + rows.map((row, i) => fundingRowHtml(row, start + i)).join('') + '</tbody></table></div>' +
     '<div id="funding-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>' + emptyTitle + '</h3><p>Records will appear here as activity comes in.</p></div>' +
     '<div id="table-pager">' + navigation() + '</div></section>';
 }
 
-function tradeRowCells(row: Row, index: number, total: number) {
-  const tradeId = '#' + (4000 + total - index);
+function tradeRowCells(row: Row, rowNumber: number) {
   const clientName = String(row.clientName || recordReference(row.uid));
   const dueAt = Number(row.dueAt);
   const createdAt = Number(row.createdAt);
@@ -957,7 +1044,7 @@ function tradeRowCells(row: Row, index: number, total: number) {
     : outcome === 'refund' ? '<span class="trade-status-refund">REFUND</span>'
     : '<span class="trade-status-open">OPEN</span>';
   return [
-    esc(tradeId),
+    '#' + rowNumber,
     '<strong>' + esc(clientName) + '</strong>',
     pair(row.symbol),
     esc(String(row.direction || '').toUpperCase()),
@@ -966,8 +1053,8 @@ function tradeRowCells(row: Row, index: number, total: number) {
     badge,
   ];
 }
-function tradeRowHtml(row: Row, index: number, total: number) {
-  const c = tradeRowCells(row, index, total);
+function tradeRowHtml(row: Row, rowNumber: number) {
+  const c = tradeRowCells(row, rowNumber);
   return '<tr data-row-id="' + esc(row.id) + '">' +
     '<td class="client-id-cell">' + c[0] + '</td>' +
     '<td>' + c[1] + '</td>' +
@@ -979,14 +1066,15 @@ function tradeRowHtml(row: Row, index: number, total: number) {
   '</tr>';
 }
 function buildTradesHtml(rows: Row[]) {
+  const start = firstRowNumber();
   return '<div class="page-header-row">' +
     '<h1 class="page-main-title">Live Trades</h1>' +
     '<button class="button live-updates-btn" type="button" disabled>⬤ LIVE UPDATES</button>' +
     '</div>' +
     '<section class="panel">' +
     '<div class="table-wrap"' + (rows.length === 0 ? ' hidden' : '') + '><table>' +
-    '<thead><tr><th>ID</th><th>CLIENT</th><th>ASSET</th><th>DIRECTION</th><th>AMOUNT</th><th>TIMEFRAME</th><th>STATUS</th></tr></thead>' +
-    '<tbody id="trades-tbody">' + rows.map((row, i) => tradeRowHtml(row, i, rows.length)).join('') + '</tbody></table></div>' +
+    '<thead><tr><th>NO.</th><th>CLIENT</th><th>ASSET</th><th>DIRECTION</th><th>AMOUNT</th><th>TIMEFRAME</th><th>STATUS</th></tr></thead>' +
+    '<tbody id="trades-tbody">' + rows.map((row, i) => tradeRowHtml(row, start + i)).join('') + '</tbody></table></div>' +
     '<div id="trades-blank" class="blank"' + (rows.length > 0 ? ' hidden' : '') + '><div class="blank-icon">◇</div><h3>No trades yet</h3><p>Records will appear here as activity comes in.</p></div>' +
     '<div id="table-pager">' + navigation() + '</div></section>';
 }
@@ -1043,11 +1131,14 @@ async function fetchAdminPayload(targetRoute: string, current: List): Promise<{ 
     const page = thread ? await api.call<SupportPage>('admin.messages', { uid, cursor: current.cursors[current.page] }) : data.activity;
     return { payload: { data, page }, rows: page.rows, next: page.cursor, clientRow: { ...data.profile, id: uid } };
   }
+  const pageArgs = { cursor: current.cursors[current.page], limit: ADMIN_TABLE_PAGE_SIZE };
   let pageRes: Page;
-  if (targetRoute === 'clients') pageRes = await api.call<Page>('admin.clients', { search: current.search, cursor: current.cursors[current.page], limit: CLIENTS_PAGE_SIZE });
-  else if (targetRoute === 'deposits' || targetRoute === 'withdrawals') pageRes = await api.call<Page>('admin.funding', { kind: targetRoute === 'withdrawals' ? 'withdrawal' : 'deposit', status: current.status, cursor: current.cursors[current.page] });
-  else if (targetRoute === 'trades') pageRes = await api.call<Page>('admin.trades', { cursor: current.cursors[current.page] });
-  else pageRes = await api.call<Page>('admin.audit', { cursor: current.cursors[current.page] });
+  if (targetRoute === 'clients') pageRes = await api.call<Page>('admin.clients', { ...pageArgs, search: current.search });
+  else if (targetRoute === 'deposits' || targetRoute === 'withdrawals') pageRes = await api.call<Page>('admin.funding', {
+    ...pageArgs, kind: targetRoute === 'withdrawals' ? 'withdrawal' : 'deposit', status: current.status,
+  });
+  else if (targetRoute === 'trades') pageRes = await api.call<Page>('admin.trades', pageArgs);
+  else pageRes = await api.call<Page>('admin.audit', pageArgs);
   return { payload: { rows: pageRes.rows, next: pageRes.cursor }, rows: pageRes.rows, next: pageRes.cursor };
 }
 
@@ -1120,11 +1211,7 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
       const formatted = Number(values[key] || 0).toLocaleString();
       if (el.textContent !== formatted) el.textContent = formatted;
     }
-    const inviteCode = values.invitationCode || '';
-    const codeEl = root.querySelector<HTMLElement>('#invite-code');
-    if (codeEl && codeEl.textContent !== inviteCode) codeEl.textContent = inviteCode;
-    const copyBtn = root.querySelector<HTMLElement>('[data-action="copy-invite"]');
-    if (copyBtn) copyBtn.dataset.code = inviteCode;
+    for (const card of invitationCards) updateInvitationCard(card.kind, values[card.key] || '');
     return true;
   }
   if (targetRoute === 'client') {
@@ -1148,28 +1235,27 @@ function patchAdminDom(targetRoute: string, payload: unknown): boolean {
     return true;
   }
   const { rows } = payload as ListBundle;
+  const start = firstRowNumber();
   if (targetRoute === 'clients') {
-    const startId = list().page * CLIENTS_PAGE_SIZE + 1;
     return patchTableRows(
       'clients-tbody', 'clients-blank', rows,
-      (row, i) => clientRowCells(row, i, startId),
-      (row, i) => clientRowHtml(row, i, startId),
+      (row, i) => clientRowCells(row, i, start),
+      (row, i) => clientRowHtml(row, i, start),
       (tr, row) => { tr.style.opacity = row.frozen === true ? '0.75' : ''; }
     );
   }
   if (targetRoute === 'withdrawals' || targetRoute === 'deposits') {
-    const isWithdrawal = targetRoute === 'withdrawals';
     return patchTableRows(
       'funding-tbody', 'funding-blank', rows,
-      (row, i) => fundingRowCells(row, i, rows.length, isWithdrawal),
-      (row, i) => fundingRowHtml(row, i, rows.length, isWithdrawal)
+      (row, i) => fundingRowCells(row, start + i),
+      (row, i) => fundingRowHtml(row, start + i)
     );
   }
   if (targetRoute === 'trades') {
     return patchTableRows(
       'trades-tbody', 'trades-blank', rows,
-      (row, i) => tradeRowCells(row, i, rows.length),
-      (row, i) => tradeRowHtml(row, i, rows.length)
+      (row, i) => tradeRowCells(row, start + i),
+      (row, i) => tradeRowHtml(row, start + i)
     );
   }
   return patchTableRows(
@@ -1267,23 +1353,20 @@ function startAdminClientActivityRefresh() {
 
 async function render() {
   if (!access) return;
-  const run = ++version, target = part(0) || first;
+  const run = ++version;
   if (!admin) {
-    const hashMap: Record<string, ClientState['activeTab']> = {
-      trade: 'market', market: 'market', assets: 'assets', wallet: 'wallet',
-      transactions: 'history', history: 'tradeHistory', leaderboard: 'leaderboard',
-      settings: 'profile', profile: 'profile', notifications: 'market', messages: 'market',
-    };
-    const nextTab = hashMap[target] || 'market';
+    const nextTab = clientTabForPath(location.pathname);
+    replaceWorkspacePath(clientPaths[nextTab]);
     activateClientTab(nextTab);
     return;
   }
   stop();
-  route = nav().some(item => item[0] === target) || (admin && target === 'client' && clientId()) ? target : first;
+  adminLocation = adminRouteForPath(location.pathname);
+  const target = adminLocation.route;
+  route = nav().some(item => item[0] === target) || (target === 'client' && clientId()) ? target : first;
+  replaceWorkspacePath(route === 'client' ? adminClientPath(clientId(), clientSection() === 'messages') : adminPath(route));
   if (route === 'clients') startAdminClientActivityRefresh();
-  const locationLabel = root.querySelector('#workspace-location');
-  if (locationLabel) locationLabel.textContent = routeName();
-  for (const link of root.querySelectorAll<HTMLElement>('[data-nav]')) {
+  for (const link of root.querySelectorAll<HTMLElement>('#sidebar [data-nav]')) {
     if (link.dataset.nav === (route === 'client' ? 'clients' : route)) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
@@ -1315,7 +1398,7 @@ async function render() {
   } finally { clearTimeout(delay); }
 }
 function openClientTradeConfirm(dir: 'up' | 'down') {
-  if (!home || clientState.activeTrade) return;
+  if (!home || clientState.activeTrade || !isTradableAsset(clientState.selected)) return;
   const rawAmt = Number(root.querySelector<HTMLInputElement>('#tradeAmount')?.value || 1000) || 1000;
   clientState.pendingTrade = { dir, amount: Math.max(0, rawAmt), dur: clientState.selDur, profit: clientState.selProfit };
   const overlay = root.querySelector<HTMLElement>('#tradeConfirmOverlay');
@@ -1325,7 +1408,7 @@ function openClientTradeConfirm(dir: 'up' | 'down') {
   const est = (pt.amount * (pt.profit / 100)).toFixed(2);
   body.innerHTML = `
     <div class="trade-confirm-pair">
-      <div style="font-weight:800;font-size:17px;">${esc(formatPair(clientState.selected.symbol))}</div>
+      <div style="font-weight:800;font-size:17px;">${renderTradePair(clientState.selected.symbol, 20)}</div>
       <div class="dir-pill ${pt.dir}">${pt.dir === 'up' ? 'BUY' : 'SELL'}</div>
     </div>
     <div style="background:#0a121c;border:1px solid var(--iq-border);border-radius:12px;padding:10px 12px;margin-bottom:12px;">
@@ -1356,6 +1439,10 @@ function openClientTradeConfirm(dir: 'up' | 'down') {
 
 async function executeClientTrade(dir: 'up' | 'down', amountRupees: number, durSec: number, profitPct: number) {
   if (!home || clientState.activeTrade) return;
+  if (!isTradableAsset(clientState.selected)) {
+    clientAlert('Trading unavailable', 'This market is view-only.');
+    return;
+  }
   if (!home.profile.tradeEnabled || home.profile.frozen) {
     clientAlert('Trading Restricted', home.profile.frozen ? 'Account is frozen. Contact support.' : 'Trading is paused for this account.');
     return;
@@ -1401,16 +1488,24 @@ function updateMarket() {
   if (admin || !home) return;
   clientState.selected = selected;
   clientState.frame = frame;
+  const tradable = isTradableAsset(selected);
+  if (!tradable) clientState.livePrice = 0;
+  const liveDot = root.querySelector<HTMLElement>('.chart-live-dot');
+  if (liveDot) liveDot.hidden = !tradable;
+  const feedStatus = root.querySelector('#feed-status');
+  if (feedStatus && !tradable) feedStatus.textContent = 'Market data unavailable';
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-action="client-trade-click"]')) {
+    button.disabled = !home.profile.tradeEnabled || !tradable;
+  }
   const hAsset = root.querySelector('#headerAsset');
-  if (hAsset) hAsset.textContent = selected.code.slice(0, 2) + '...';
+  if (hAsset) hAsset.textContent = selected.code;
   const sAsset = root.querySelector('#selectedAssetName');
   if (sAsset) sAsset.textContent = formatPair(selected.symbol);
   const cMarket = root.querySelector('#chartMarketName');
   if (cMarket) cMarket.textContent = formatPair(selected.symbol);
-  const hIconWrap = root.querySelector<HTMLElement>('.asset-btn-desk .asset-pill-icon, .asset-btn-desk .asset-pill-dot');
-  if (hIconWrap) hIconWrap.outerHTML = coinIcon(selected.code, selected.color);
-  const sDot = root.querySelector<HTMLElement>('#assetDotSmall');
-  if (sDot) { sDot.textContent = selected.code.slice(0, 2); sDot.style.background = selected.color; }
+  for (const icon of root.querySelectorAll<HTMLImageElement>('[data-selected-coin] .coin-logo')) {
+    icon.src = coinLogoUrls[selected.code];
+  }
   for (const btn of root.querySelectorAll<HTMLElement>('[data-action="frame"]')) {
     const active = btn.dataset.id === frame;
     btn.classList.toggle('active', active);
@@ -1588,8 +1683,11 @@ root.addEventListener('click', async event => {
   if (!target) return;
   const action = target.dataset.action, id = target.dataset.id || '';
   const side = root.querySelector('#sidebar');
-  if (target.dataset.nav) {
+  if (target instanceof HTMLAnchorElement && target.dataset.nav) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
     dismissNavigation(side?.classList.contains('open'));
+    go(target.pathname);
     return;
   }
   try {
@@ -1621,32 +1719,27 @@ root.addEventListener('click', async event => {
         break;
       }
       case 'copy-invite': {
-        const code = target.dataset.code || root.querySelector('#invite-code')?.textContent || '';
-        if (!code) break;
+        const code = target.dataset.code;
+        const card = invitationCards.find(item => item.kind === id);
+        if (!card || !code) break;
         await navigator.clipboard.writeText(code);
-        toast('Invitation code ' + code + ' copied to clipboard!');
+        toast(card.title + ' copied.');
         break;
       }
       case 'refresh-invite': {
-        if (target.classList.contains('is-spinning')) break;
-        const spinStart = Date.now();
-        target.classList.add('is-spinning');
-        try {
-          const res = await api.call<{ code: string }>('admin.invite.refresh', { requestId: crypto.randomUUID() });
-          const codeEl = root.querySelector<HTMLElement>('#invite-code');
-          if (codeEl) codeEl.textContent = res.code;
-          const copyBtn = root.querySelector<HTMLElement>('[data-action="copy-invite"]');
-          if (copyBtn) copyBtn.dataset.code = res.code;
-          const cached = adminCache.get('overview');
-          if (cached?.data && typeof cached.data === 'object') {
-            (cached.data as OverviewData).invitationCode = res.code;
-          }
-          invalidateAdminCache(['audit']);
-          toast('New invitation code generated: ' + res.code);
-        } finally {
-          const wait = Math.max(0, 420 - (Date.now() - spinStart));
-          window.setTimeout(() => target.classList.remove('is-spinning'), wait);
-        }
+        const card = invitationCards.find(item => item.kind === id);
+        if (!card) break;
+        const currentCode = target.closest('[data-invite-kind]')?.querySelector<HTMLButtonElement>('[data-action="copy-invite"]')?.dataset.code;
+        const description = card.kind === 'funded'
+          ? (currentCode ? 'The current code will stop giving the ₹2,000 signup credit.' : card.description)
+          : (currentCode ? 'This will replace the code shown on your dashboard.' : card.description);
+        const box = panel();
+        box.innerHTML = '<h2 id="detail-heading">Generate a new ' + card.title + '?</h2>' +
+          '<form class="stack" data-form="admin.invite.refresh"><p>' + description + '</p>' +
+          '<input type="hidden" name="kind" value="' + card.kind + '">' +
+          '<div class="button-row"><button type="button" class="button secondary compact" data-action="close" autofocus>Cancel</button>' +
+          '<button class="button">Generate code</button></div>' + formStatus() + '</form>';
+        if (!box.open) box.showModal();
         break;
       }
       case 'enroll': await enroll(); break;
@@ -1658,7 +1751,7 @@ root.addEventListener('click', async event => {
           selected = asset;
           clientState.selected = asset;
           root.querySelector('#assetList')?.classList.remove('show');
-          if (!admin && clientState.activeTab === 'assets') activateClientTab('market');
+          if (!admin && clientState.activeTab === 'assets') go(clientPaths.market);
           updateMarket();
         }
         break;
@@ -1691,15 +1784,12 @@ root.addEventListener('click', async event => {
         break;
       case 'client-nav': {
         const tab = (target.dataset.tab || 'market') as ClientState['activeTab'];
-        const item = clientNavItems.find(x => x.tab === tab);
-        if (item && location.hash !== '#' + item.hash) location.hash = item.hash;
-        else activateClientTab(tab);
+        go(clientPaths[tab]);
         break;
       }
       case 'client-open-deposit':
         clientState.walletSubTab = 'deposit';
-        if (location.hash !== '#wallet') location.hash = 'wallet';
-        else activateClientTab('wallet');
+        go(clientPaths.wallet);
         break;
       case 'client-wallet-tab':
         clientState.walletSubTab = target.dataset.sub === 'withdraw' ? 'withdraw' : 'deposit';
@@ -1739,8 +1829,7 @@ root.addEventListener('click', async event => {
         break;
       }
       case 'client-toggle-assets':
-        if (clientState.activeTab === 'assets') activateClientTab('market');
-        else activateClientTab('assets');
+        go(clientState.activeTab === 'assets' ? clientPaths.market : clientPaths.assets);
         break;
       case 'client-toggle-notif':
         root.querySelector('#msgOverlay')?.classList.remove('open');
@@ -1907,8 +1996,8 @@ root.addEventListener('click', async event => {
           ]));
         break;
       }
-      case 'client': go('client/' + encodeURIComponent(id)); break;
-      case 'client-tab': go('client/' + encodeURIComponent(clientId()) + (id === 'messages' && canChat() ? '/messages' : '')); break;
+      case 'client': go(adminClientPath(id)); break;
+      case 'client-tab': go(adminClientPath(clientId(), id === 'messages' && canChat())); break;
       case 'next': { const current = list(); if (current.next) { current.cursors[current.page + 1] = current.next; current.page++; await render(); } break; }
       case 'previous': if (list().page > 0) { list().page--; await render(); } break;
       case 'restrictions': case 'adjustment': clientAction(action, id); break;
@@ -2145,7 +2234,7 @@ root.addEventListener('click', async event => {
       case 'client-chat':
         lists.delete('client:' + id + ':messages');
         adminCache.delete('client:' + id + ':messages:0');
-        go('client/' + encodeURIComponent(id) + '/messages');
+        go(adminClientPath(id, true));
         break;
       case 'new-client': {
         const box = panel();
@@ -2339,6 +2428,24 @@ root.addEventListener('submit', async event => {
     if (await accountForm(op, values, form)) return;
     if (op === 'search') { window.clearTimeout(searchDebounceTimer); await refreshClientsSearch(String(values.search || '')); return; }
 
+    if (op === 'admin.invite.refresh') {
+      const card = invitationCards.find(item => item.kind === values.kind);
+      if (!card) return;
+      const session = authVersion;
+      const { code } = await api.call<{ code: string }>(op, { kind: card.kind, requestId: form.dataset.operationId ||= crypto.randomUUID() });
+      if (authVersion !== session || !access) return;
+      const cached = adminCache.get('overview');
+      if (cached) (cached.data as OverviewData)[card.key] = code;
+      invalidateAdminCache(['overview', 'audit']);
+      if (form.isConnected && panel().open) panel().close();
+      if (route === 'overview') {
+        updateInvitationCard(card.kind, code);
+        void silentRefreshCurrentRoute();
+      }
+      toast(card.title + ' generated.');
+      return;
+    }
+
     if (op === 'admin.depositSettings.update') {
       const changes = await depositSettingsChanges(form, values);
       if (!Object.keys(changes).length) {
@@ -2388,6 +2495,11 @@ root.addEventListener('submit', async event => {
       if (!home) return;
       const restriction = clientWithdrawalRestriction(home);
       if (restriction) throw new Error(restriction);
+      const reputationWarning = withdrawalReputationWarning(home.profile.reputationScore);
+      if (reputationWarning) {
+        clientAlert('Low reputation points', reputationWarning);
+        return;
+      }
       const amt = Number(values.amount || 0);
       const pin = String(values.withdrawalPin || '').trim();
       const country = String(values.country || clientState.bankCountry || 'India');
@@ -2422,7 +2534,7 @@ root.addEventListener('submit', async event => {
       void refreshClientTabData('history', true);
       void hydrateClientSidebarData();
       clientAlert('Success', 'Withdrawal request submitted.');
-      activateClientTab('history');
+      go(clientPaths.history);
       return;
     }
 
@@ -2518,7 +2630,8 @@ root.addEventListener('submit', async event => {
     if (op === 'client.withdraw' && home) updateWithdrawalRestriction(home);
   }
 });
-window.addEventListener('hashchange', () => {
+window.addEventListener('popstate', () => {
+  replaceWorkspacePath(workspaceEntryPath(location, admin ? adminNav : undefined));
   dismissNavigation();
   void render();
 });
@@ -2530,6 +2643,10 @@ if (!admin) {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !access) return;
   if (admin) {
+    if (adminSessionExpiresAt && Date.now() + clockOffset >= adminSessionExpiresAt) {
+      expireAdminSession();
+      return;
+    }
     const cached = adminCache.get(adminCacheKey(route));
     if (!cached || cached.dirty) void silentRefreshCurrentRoute();
     else void markVisibleChatRead(route, cached.data);
@@ -2538,7 +2655,10 @@ document.addEventListener('visibilitychange', () => {
     if (!syncInitialized || (clientState.activeTrade && clientState.activeTrade.dueAt <= Date.now() + clockOffset)) void silentRefreshUserView();
   }
 });
-window.addEventListener('pagehide', stop);
+window.addEventListener('pagehide', () => {
+  if (admin && person) expireAdminSession();
+  else stop();
+});
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   if (access) void render();

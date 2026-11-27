@@ -5,15 +5,19 @@ import { FieldPath, FieldValue, getFirestore, type DocumentData, type Query, typ
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { demoPrice, durations, findAsset, profitForDuration, profitPercent } from './market';
+import { demoPrice, durations, findAsset, isTradableAsset, profitForDuration, profitPercent } from './market';
 import { walletFreeze } from './wallet-freeze';
+import { withdrawalReputationWarning } from './withdrawal-reputation';
 
 initializeApp();
 const db = getFirestore();
 const local = process.env.FUNCTIONS_EMULATOR === 'true';
 const requireAppCheck = defineBoolean('REQUIRE_APP_CHECK', { default: true });
 const region = defineString('QOPTION_REGION', { default: 'us-central1' });
+const staffSessionSeconds = 30 * 60;
 const maxAmount = 100000000;
+const invitationBonus = 200_000;
+const bonusCodePrefix = 'BONUS-';
 const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 type Data = Record<string, unknown>;
 type Actor = { uid: string; staff: string[]; allClients: boolean };
@@ -46,9 +50,9 @@ function cents(value: unknown, signed = false): number {
 function digest(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
-function generateInviteCode() {
+function generateInviteCode(length = 8) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = randomBytes(8);
+  const bytes = randomBytes(length);
   return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
 }
 async function bumpSync(fields: Record<string, unknown>, userUids: string[] = []) {
@@ -115,39 +119,51 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
   if (staffDoc.exists && staffDoc.get('active') === true) {
     fail('permission-denied', 'Staff accounts cannot access the client workspace. Use the admin panel.');
   }
-  let created = false;
-  await db.runTransaction(async tx => {
+  const trimmedName = nameParam?.trim().slice(0, 60);
+  const trimmedInvite = inviteCodeParam?.trim().slice(0, 40);
+  const normalizedInvite = trimmedInvite?.toUpperCase();
+  const fundedInvite = normalizedInvite?.startsWith(bonusCodePrefix) ? normalizedInvite : undefined;
+  const created = await db.runTransaction(async tx => {
     const [user, balance] = await Promise.all([tx.get(profile(uid)), tx.get(wallet(uid))]);
-    const trimmedName = nameParam && nameParam.trim() ? nameParam.trim().slice(0, 60) : undefined;
-    const trimmedInvite = inviteCodeParam && inviteCodeParam.trim() ? inviteCodeParam.trim().slice(0, 40) : undefined;
+    let invitedBy = '';
+    const now = Date.now();
+    if (!user.exists && !balance.exists && fundedInvite) {
+      const matches = await tx.get(db.collection('staff').where('fundedInvitationCode', '==', fundedInvite).limit(2));
+      const issuer = matches.docs[0]?.data();
+      if (matches.size !== 1 || issuer?.active !== true || !Array.isArray(issuer.roles) || !issuer.roles.includes('admin')) {
+        fail('invalid-argument', 'This 2000 invitation code is invalid or has been replaced.');
+      }
+      invitedBy = matches.docs[0].id;
+    }
     if (!user.exists) {
-      created = true;
       const name = trimmedName || email.split('@')[0]?.slice(0, 40) || 'Trader';
       tx.create(profile(uid), {
         uid,
         email,
         name,
         nameSearch: name.toLowerCase(),
-        invitation_code: trimmedInvite || '',
-        createdAt: Date.now(),
+        invitation_code: invitedBy ? '2000 Invitation Code' : fundedInvite ? '' : trimmedInvite || '',
+        createdAt: now,
         tradeEnabled: true,
         withdrawalEnabled: true,
-        assignedTo: ''
+        assignedTo: invitedBy
       });
-    } else if (trimmedName || trimmedInvite) {
+    } else {
       const updates: Record<string, unknown> = {};
       if (trimmedName) {
         updates.name = trimmedName;
         updates.nameSearch = trimmedName.toLowerCase();
       }
-      if (trimmedInvite) {
+      if (trimmedInvite && !fundedInvite) {
         updates.invitation_code = trimmedInvite;
       }
-      tx.update(profile(uid), updates);
+      if (Object.keys(updates).length) tx.update(profile(uid), updates);
     }
     if (!balance.exists) {
-      tx.create(wallet(uid), { available: 0, held: 0 });
+      tx.create(wallet(uid), { available: invitedBy ? invitationBonus : 0, held: 0 });
+      if (invitedBy) ledger(tx, uid, 'invitation_bonus_' + uid, 'Invitation bonus', invitationBonus, 0, now, '2000 Invitation Code signup credit');
     }
+    return !user.exists;
   });
   if (created) await bumpSync({ clientsAt: Date.now() }, [uid]);
 }
@@ -164,6 +180,13 @@ async function actor(request: CallableRequest, staffRequired: boolean): Promise<
     fail('permission-denied', 'Verify your email to access staff tools.');
   }
   return { uid, staff: staff.roles, allClients: staff.allClients === true };
+}
+
+function requireStaffSession(authTime: unknown) {
+  const expiresAt = typeof authTime === 'number' && Number.isSafeInteger(authTime) && authTime > 0
+    ? (authTime + staffSessionSeconds) * 1000 : 0;
+  if (expiresAt <= Date.now()) fail('unauthenticated', 'Your admin session expired. Sign in again.');
+  return expiresAt;
 }
 
 function requireRole(user: Actor, role: string) {
@@ -231,6 +254,7 @@ async function placeTrade(user: Actor, data: Data) {
   if (!asset || !durations.some(value => value === duration) || (direction !== 'up' && direction !== 'down')) {
     fail('invalid-argument', 'Choose a supported market, direction, and duration.');
   }
+  if (!isTradableAsset(asset)) fail('failed-precondition', 'Trading is unavailable for this market.');
   const stake = cents(data.amount);
   const now = Date.now(), dueAt = now + 1000 * duration;
   const pct = profitForDuration(duration);
@@ -273,12 +297,12 @@ async function settle(id: string, now: number): Promise<string | null> {
     let exit: number | null = null;
     if (trade.feedVersion === 2) {
       if (liveExit !== null) exit = liveExit;
-      else if (asset) {
+      else if (asset && isTradableAsset(asset)) {
         const simDelta = (demoPrice(asset, trade.dueAt) - demoPrice(asset, trade.createdAt)) / Math.max(1e-9, demoPrice(asset, trade.createdAt));
         exit = Math.round(Number(trade.entry) * (1 + simDelta) * 1e6) / 1e6;
       }
     } else {
-      exit = asset && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
+      exit = asset && isTradableAsset(asset) && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
     }
     const outcome = tradeMode === 'win' ? 'win'
       : tradeMode === 'loss' ? 'loss'
@@ -439,8 +463,8 @@ async function askFunding(user: Actor, data: Data) {
       const freeze = walletFreeze(Number(balance.get('available') ?? 0), person.data() ?? {});
       if (freeze.kind === 'withdrawals') fail('failed-precondition', 'Withdrawals are frozen for this account.');
       if (!person.get('withdrawalEnabled')) fail('failed-precondition', 'Withdrawals are paused for this account.');
-      const rep = Number(person.get('reputationScore') ?? 100);
-      if (rep < 100) fail('failed-precondition', 'Withdrawals require a Reputation Score of at least 100.');
+      const reputationWarning = withdrawalReputationWarning(person.get('reputationScore'));
+      if (reputationWarning) fail('failed-precondition', reputationWarning);
       if (freeze.kind === 'amount' && amount > freeze.available) fail('failed-precondition', 'The withdrawal amount exceeds your unfrozen balance.');
       const enforcedForm = data.withdrawalPin !== undefined || data.bankDetails !== undefined;
       if (enforcedForm) {
@@ -663,9 +687,10 @@ async function staffQuery(user: Actor, collection: string) {
 }
 
 async function adminOverview(user: Actor) {
-  const [clients, trades, funding, staffProfile] = await Promise.all([
+  const [clients, trades, funding, staffProfile, staffAccount] = await Promise.all([
     staffQuery(user, 'profiles'), staffQuery(user, 'trades'), staffQuery(user, 'funding'),
-    profile(user.uid).get()
+    profile(user.uid).get(),
+    user.staff.includes('admin') ? db.collection('staff').doc(user.uid).get() : null,
   ]);
   const [clientCount, tradeCount, deposits, withdrawals] = await Promise.all([
     clients.count().get(), trades.where('status', '==', 'open').count().get(),
@@ -676,17 +701,13 @@ async function adminOverview(user: Actor) {
     user.staff.includes('admin') ? trades.orderBy('createdAt', 'desc').limit(4).get() : null,
     user.staff.includes('finance') ? funding.where('status', '==', 'pending').orderBy('createdAt', 'desc').limit(4).get() : null,
   ]);
-  let invitationCode = (staffProfile.data()?.invitation_code as string | undefined) || '';
-  if (!invitationCode) {
-    invitationCode = generateInviteCode();
-    await profile(user.uid).set({ invitation_code: invitationCode }, { merge: true });
-  }
   return {
     clients: clientCount.data().count,
     trades: tradeCount.data().count,
     deposits: deposits.data().count,
     withdrawals: withdrawals.data().count,
-    invitationCode,
+    invitationCode: staffProfile.get('invitation_code') || '',
+    fundedInvitationCode: staffAccount?.get('fundedInvitationCode') || '',
     recent: recent?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? [],
     pending: pending?.docs.map(doc => ({ ...doc.data(), id: doc.id })) ?? []
   };
@@ -700,12 +721,19 @@ async function adminBadges(user: Actor) {
   return { deposits: deposits.data().count, withdrawals: withdrawals.data().count };
 }
 async function adminInviteRefresh(user: Actor, data: Data) {
-  const code = generateInviteCode();
-  const result = await mutate(user, data, 'admin.invite.refresh', [code], async tx => {
-    const role = user.staff[0] || 'admin';
-    await checkStaff(tx, user, role);
-    tx.set(profile(user.uid), { invitation_code: code }, { merge: true });
-    audit(tx, user, user.uid, 'Invitation code refreshed', 'Invitation code randomized to ' + code, Date.now());
+  const kind = data.kind ?? 'standard';
+  if (kind !== 'standard' && kind !== 'funded') fail('invalid-argument', 'Choose an invitation code type.');
+  const funded = kind === 'funded';
+  if (funded) requireRole(user, 'admin');
+  const code = funded ? bonusCodePrefix + generateInviteCode(20) : generateInviteCode();
+  const result = await mutate(user, data, 'admin.invite.refresh', [kind], async tx => {
+    await checkStaff(tx, user, funded ? 'admin' : user.staff[0]);
+    if (funded) {
+      tx.update(db.collection('staff').doc(user.uid), { fundedInvitationCode: code });
+    } else {
+      tx.set(profile(user.uid), { invitation_code: code }, { merge: true });
+    }
+    audit(tx, user, user.uid, 'Invitation code refreshed', funded ? '2000 Invitation Code generated' : 'Client Invitation Code generated', Date.now());
     return { code };
   });
   await bumpSync({ auditAt: Date.now() });
@@ -1012,20 +1040,17 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
   const op = text(data.op, 64);
   const isAdminOp = op.startsWith('admin.');
   const user = await actor(request, isAdminOp);
+  const sessionExpiresAt = isAdminOp ? requireStaffSession(request.auth?.token.auth_time) : 0;
 
   // For client ops, verify the caller is NOT a staff member (belt + suspenders check in addition to upsertProfile guard).
   // This prevents a staff account from using the client API even if they already have a stale profile document.
-  if (!isAdminOp && op !== 'admin.access') {
+  if (!isAdminOp) {
     const staffDoc = await db.collection('staff').doc(user.uid).get();
     if (staffDoc.exists && staffDoc.get('active') === true) {
       fail('permission-denied', 'Staff accounts cannot access the client workspace. Use the admin panel.');
     }
   }
 
-  const staffWrite = ['admin.funding.decide', 'admin.depositSettings.update', 'admin.client.restrict', 'admin.client.adjust', 'admin.message.send', 'admin.client.update', 'admin.client.create', 'admin.notifications.push', 'admin.notifications.delete', 'admin.invite.refresh'].includes(op);
-  if (!local && staffWrite && (!request.auth?.token.auth_time || Date.now() / 1000 - request.auth.token.auth_time > 1800)) {
-    fail('permission-denied', 'Sign out and sign in again before applying a staff change.');
-  }
   switch (op) {
     case 'access': {
       const nameParam = typeof data.name === 'string' ? data.name : undefined;
@@ -1081,7 +1106,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       }
       return page(own(list, user.uid), data, [list, user.uid]);
     }
-    case 'admin.access': return { roles: user.staff, serverTime: Date.now() };
+    case 'admin.access': return { roles: user.staff, serverTime: Date.now(), sessionExpiresAt };
     case 'admin.dashboard': return adminOverview(user);
     case 'admin.badges': return adminBadges(user);
     case 'admin.invite.refresh': return adminInviteRefresh(user, data);

@@ -14,7 +14,7 @@ firebase.json                    Hosting routes and emulator configuration
 firestore.rules                  Access policy for direct Firestore requests
 firestore.indexes.json           Composite indexes under version control
 apps/web/user/                   User HTML entry point and views
-apps/web/admin/                  Admin HTML entry point and views
+apps/web/advin.html              Admin sign-in and workspace entry point
 apps/web/shared/                 UI components, routing helpers, and API client
 functions/src/                   Auth, market data, trade, wallet, and admin services
 packages/contracts/              Shared request and response schemas

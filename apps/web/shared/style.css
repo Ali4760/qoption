@@ -7,6 +7,12 @@
   unicode-range: U+004F, U+0069, U+006E-0070, U+0074;
 }
 
+.coin-logo {
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
 :root {
   color-scheme: dark;
   font-family: Inter, "Segoe UI", system-ui, sans-serif;

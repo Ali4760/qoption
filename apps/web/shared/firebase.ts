@@ -1,6 +1,6 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, setPersistence, type Auth } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, initializeAuth, inMemoryPersistence, setPersistence, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 
@@ -38,12 +38,12 @@ async function configuration(): Promise<FirebaseOptions> {
   return config;
 }
 
-export async function connect(audience: string) {
+export async function connect(audience: 'admin' | 'user', onAdminSessionExpired?: () => void) {
   const app = initializeApp(await configuration(), 'qoption-' + audience);
   if (!emulator && import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY) {
     initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
   }
-  const auth = getAuth(app);
+  const auth = audience === 'admin' ? initializeAuth(app, { persistence: inMemoryPersistence }) : getAuth(app);
   const firestore = getFirestore(app);
   const functions = getFunctions(app, import.meta.env.VITE_FIREBASE_REGION || 'us-central1');
   if (emulator) {
@@ -51,13 +51,21 @@ export async function connect(audience: string) {
     connectFirestoreEmulator(firestore, '127.0.0.1', 8080);
     connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   }
-  await setPersistence(auth, audience === 'user' && rememberPreference() ? browserLocalPersistence : browserSessionPersistence);
+  if (audience === 'user') await setPersistence(auth, rememberPreference() ? browserLocalPersistence : browserSessionPersistence);
   const call = httpsCallable<Record<string, unknown>, unknown>(functions, 'workspace');
 
   return {
     auth,
     async call<T>(op: string, args: Record<string, unknown> = {}) {
-      return (await call({ op, ...args })).data as T;
+      const user = auth.currentUser;
+      try {
+        return (await call({ op, ...args })).data as T;
+      } catch (error) {
+        if (audience === 'admin' && user && user === auth.currentUser && (error as { code?: string }).code === 'functions/unauthenticated') {
+          onAdminSessionExpired?.();
+        }
+        throw error;
+      }
     },
     watchAdminSync(onChange: (data: Record<string, unknown>) => void): Unsubscribe {
       return onSnapshot(doc(firestore, 'meta', 'liveSync'), snap => {

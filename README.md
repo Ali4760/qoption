@@ -12,14 +12,14 @@ npm ci --prefix functions
 npm run emulators
 ```
 
-In a second terminal run `npm run seed`. Open the [user sign-in page](http://127.0.0.1:5000/login.html) or [admin panel](http://127.0.0.1:5000/admin/) and select **Open trading workspace**. The seed command only connects to localhost and is safe to run again. Start emulators before seeding. The [Emulator UI](http://127.0.0.1:4000/) shows the local Auth and Firestore state.
+In a second terminal run `npm run seed`. Open the [user sign-in page](http://127.0.0.1:5000/login) or [admin panel](http://127.0.0.1:5000/advin) and select **Open trading workspace**. The seed command only connects to localhost and is safe to run again. Start emulators before seeding. The [Emulator UI](http://127.0.0.1:4000/) shows the local Auth and Firestore state.
 
 Run `npm run check` for both TypeScript projects. With the emulators running and seeded, run `npm run test:integration` to exercise permissions, settlement, funding, messaging, and pagination.
 
 ## Deploy the hosted prototype
 
 1. In Firebase project `qoption-6c226`, register a Web app and enable the Email/Password sign-in provider. Firebase Hosting serves web configuration at `/__/firebase/init.json`. If using an explicit config at build time, copy the public web config field names from `.env.example`. Choose a Firestore location near the Functions region.
-2. For hosted staff access, upgrade Firebase Authentication to Identity Platform and enable its TOTP factor. Create the intended Auth user and a Firestore document at `staff/{uid}` containing `active: true`, a `roles` array drawn from `admin`, `finance`, and `support`, and an `allClients` boolean. An account with `allClients: false` may work only with client records assigned to its UID. Sign in on `/admin/` and follow the email verification and authenticator steps.
+2. For hosted staff access, upgrade Firebase Authentication to Identity Platform and enable its TOTP factor. Create the intended Auth user and a Firestore document at `staff/{uid}` containing `active: true`, a `roles` array drawn from `admin`, `finance`, and `support`, and an `allClients` boolean. An account with `allClients: false` may work only with client records assigned to its UID. Sign in on `/advin` and follow the email verification and authenticator steps.
 3. Register the web app with Firebase App Check using a reCAPTCHA Enterprise site key. Configure `VITE_FIREBASE_APPCHECK_SITE_KEY` in the build environment. If choosing a nondefault Functions region, set both `QOPTION_REGION` in the Functions environment and `VITE_FIREBASE_REGION` for the frontend build. The defaults are `us-central1`.
 4. With Blaze enabled and dependencies installed, build the app and deploy against the authorized project.
 

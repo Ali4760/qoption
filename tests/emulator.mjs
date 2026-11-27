@@ -11,6 +11,7 @@ const db = require('firebase-admin/firestore').getFirestore();
 const auth = require('firebase-admin/auth').getAuth();
 const identity = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:';
 const functionUrl = 'http://127.0.0.1:5001/demo-qoption/us-central1/workspace';
+const firestoreUrl = 'http://127.0.0.1:8080/v1/projects/demo-qoption/databases/(default)/documents/';
 const email = 'test-' + randomUUID() + '@example.test';
 const password = 'QoptionDemo!2026';
 
@@ -31,6 +32,69 @@ async function call(account, op, args = {}, expected = 200) {
   assert.equal(response.status, expected, op + ': ' + JSON.stringify(data.error || {}));
   return data.result;
 }
+
+async function checkAdminSession(staff, trader, uid) {
+  // The Auth emulator issues unsigned test tokens. Change only the sign-in time for the expiry check.
+  const [header, payload, signature] = staff.idToken.split('.');
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  const access = await call(staff, 'admin.access');
+  assert.equal(access.sessionExpiresAt, (claims.auth_time + 1800) * 1000);
+  assert.ok(access.sessionExpiresAt > access.serverTime);
+  const expiredClaims = { ...claims, auth_time: Math.floor(Date.now() / 1000) - 1801 };
+  const expired = { idToken: [header, Buffer.from(JSON.stringify(expiredClaims)).toString('base64url'), signature].join('.') };
+  for (const op of ['admin.access', 'admin.dashboard', 'admin.clients', 'admin.client', 'admin.client.update']) {
+    await call(expired, op, { uid }, 401);
+  }
+  for (const [account, status] of [[staff, 200], [expired, 403], [trader, 403]]) {
+    const response = await fetch(firestoreUrl + 'meta/liveSync', { headers: { Authorization: 'Bearer ' + account.idToken } });
+    assert.equal(response.status, status, 'Live sync requires a current staff session');
+  }
+}
+
+async function checkInvitations(staff, trader, testClientUids) {
+  const newClient = async () => {
+    const client = await identityCall('signUp', 'invite-' + randomUUID() + '@example.test');
+    testClientUids.push(client.localId);
+    return client;
+  };
+  const generate = kind => call(staff, 'admin.invite.refresh', { kind, requestId: randomUUID() });
+  const { code: firstStandard } = await generate('standard');
+  const request = { kind: 'funded', requestId: randomUUID() };
+  const funded = await call(staff, 'admin.invite.refresh', request);
+  assert.match(funded.code, /^BONUS-[A-Z2-9]{20}$/);
+  assert.deepEqual(await call(staff, 'admin.invite.refresh', request), funded);
+  assert.equal((await call(staff, 'admin.dashboard')).invitationCode, firstStandard);
+
+  const { code: standard } = await generate('standard');
+  assert.notEqual(standard, firstStandard);
+  assert.equal((await call(staff, 'admin.dashboard')).fundedInvitationCode, funded.code);
+  const regular = await newClient();
+  assert.deepEqual((await call(regular, 'access', { inviteCode: standard })).wallet, { available: 0, held: 0 });
+  assert.deepEqual((await call(trader, 'access', { inviteCode: funded.code })).wallet, { available: 0, held: 0 });
+
+  const bonusClient = await newClient();
+  const registration = { inviteCode: '  ' + funded.code.toLowerCase() + '  ', amount: 1 };
+  const attempts = await Promise.all([call(bonusClient, 'access', registration), call(bonusClient, 'access', registration)]);
+  for (const result of attempts) {
+    assert.deepEqual(result.wallet, { available: 200000, held: 0 });
+    assert.equal(result.profile.assignedTo, staff.localId);
+    assert.equal(result.profile.invitation_code, '2000 Invitation Code');
+  }
+  const { rows } = await call(bonusClient, 'list', { list: 'ledger' });
+  assert.deepEqual(rows.map(row => [row.kind, row.availableDelta]), [['Invitation bonus', 200000]]);
+
+  const { code: replacement } = await generate('funded');
+  assert.notEqual(replacement, funded.code);
+  const dashboard = await call(staff, 'admin.dashboard');
+  assert.equal(dashboard.invitationCode, standard);
+  assert.equal(dashboard.fundedInvitationCode, replacement);
+  const retryClient = await newClient();
+  await call(retryClient, 'access', { inviteCode: funded.code }, 400);
+  const currentCode = { inviteCode: replacement };
+  assert.deepEqual((await call(retryClient, 'access', currentCode)).wallet, { available: 200000, held: 0 });
+  assert.deepEqual((await call(bonusClient, 'access', currentCode)).wallet, { available: 200000, held: 0 });
+}
+
 async function main() {
   const trader = await identityCall('signUp', email);
   const staff = await identityCall('signInWithPassword', 'staff@example.test');
@@ -43,6 +107,8 @@ async function main() {
     const start = await call(trader, 'access');
     assert.deepEqual(start.wallet, { available: 0, held: 0 });
     assert.deepEqual((await call(trader, 'list', { list: 'ledger' })).rows, []);
+    await checkAdminSession(staff, trader, uid);
+    await checkInvitations(staff, trader, testClientUids);
 
     const adminCreatedEmail = 'admin-created-' + randomUUID() + '@example.test';
     const adminCreated = await call(staff, 'admin.client.create', { name: 'Test Client', email: adminCreatedEmail, password });
@@ -51,7 +117,7 @@ async function main() {
     assert.deepEqual((await call(adminCreatedClient, 'access')).wallet, { available: 0, held: 0 });
     assert.deepEqual((await call(adminCreatedClient, 'list', { list: 'ledger' })).rows, []);
 
-    const unauthorised = await fetch('http://127.0.0.1:8080/v1/projects/demo-qoption/databases/(default)/documents/wallets/' + uid, {
+    const unauthorised = await fetch(firestoreUrl + 'wallets/' + uid, {
       headers: { Authorization: 'Bearer ' + trader.idToken },
     });
     assert.equal(unauthorised.status, 403, 'Direct reads obey Firestore rules');
@@ -153,6 +219,7 @@ async function main() {
     otherStaff = await identityCall('signUp', 'support-' + randomUUID() + '@example.test');
     const otherStaffRef = db.collection('staff').doc(otherStaff.localId);
     await otherStaffRef.set({ active: true, roles: ['support'], allClients: false });
+    await call(otherStaff, 'admin.invite.refresh', { kind: 'funded', requestId: randomUUID() }, 403);
     assert.deepEqual((await call(otherStaff, 'admin.clients.activity', { uids: [uid] })).rows, []);
     await otherStaffRef.update({ allClients: true });
     assert.equal(await unreadMarker(otherStaff), sent.id);
@@ -221,7 +288,7 @@ async function main() {
     const unfrozenWithdrawal = await withdraw(100);
     await call(trader, 'funding.cancel', { id: unfrozenWithdrawal.id, requestId: randomUUID() });
 
-    console.log('Firebase integration passed: zero opening balances, account separation, rules, client activity, trades, funding references, deposit settings, support chat, notifications, wallet freezes, and pagination.');
+    console.log('Firebase integration passed: invitation bonuses, zero opening balances, account separation, rules, client activity, trades, funding references, deposit settings, support chat, notifications, wallet freezes, and pagination.');
   } finally {
     const cleanup = db.batch();
     for (const name of ['trades', 'funding', 'ledger', 'messages', 'notifications', 'audit', 'operationReceipts']) {

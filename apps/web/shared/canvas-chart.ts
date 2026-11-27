@@ -1,4 +1,4 @@
-import { demoHistory, demoPrice, type Asset, type Point } from '../../../functions/src/market';
+import { demoHistory, demoPrice, isTradableAsset, type Asset, type Point, type TradableAsset } from '../../../functions/src/market';
 
 export type ChartMode = 'line' | 'candles' | 'combined';
 type ChartPoint = Point & { open?: number; high?: number; low?: number; volume?: number };
@@ -217,7 +217,7 @@ export function mountChart(
     clearTimeout(timer); clearInterval(fallbackTimer); fallbackTimer = 0; socket?.close(); socket = undefined; pending?.abort(); pending = undefined;
   }
 
-  function startSimulated(asset: Asset, interval: number, id: number, clockOffset = 0, labelText = 'Live market data') {
+  function startSimulated(asset: TradableAsset, interval: number, id: number, clockOffset = 0, labelText = 'Live market data') {
     status.textContent = labelText;
     const tick = () => {
       if (generation !== id) return;
@@ -240,6 +240,10 @@ export function mountChart(
     const id = generation, interval = frames[frame] || frames['1m'];
     stop();
     points = []; offset = 0; retries = 0; currentFrame = frame; paint();
+    if (!isTradableAsset(asset)) {
+      status.textContent = 'Market data unavailable';
+      return;
+    }
     if (!live) {
       startSimulated(asset, interval, id, clockOffset, 'Live market data');
       return;

@@ -1,31 +1,19 @@
 import logoUrl from '../assets/qoption-logo.png';
 import type { ChartMode } from './canvas-chart';
-import { assets, demoPrice, findAsset, type Asset } from '../../../functions/src/market';
+import { assets, demoPrice, findAsset, isTradableAsset, type Asset } from '../../../functions/src/market';
 import { walletFreeze } from '../../../functions/src/wallet-freeze';
+import { minimumWithdrawalReputation, withdrawalReputationWarning } from '../../../functions/src/withdrawal-reputation';
 import { dateTime, errorMessage, esc, type Home, type Page, type Row } from './view';
+import { coinIcon } from './coin-icons';
 
 const bi = (paths: string, size = 18) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
-
-// Real coin icons as SVG, keyed by coin code
-const coinIconSvg: Record<string, string> = {
-  BTC: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#f7931a"/><path fill="#fff" d="M22.6 14.2c.3-2.1-1.3-3.2-3.5-4l.7-2.8-1.7-.4-.7 2.7c-.5-.1-.9-.2-1.4-.3l.7-2.7-1.7-.4-.7 2.8c-.4-.1-.8-.2-1.2-.3l-2.3-.6-.4 1.8s1.3.3 1.2.3c.7.2.8.6.8 1l-.8 3.3c0 .1.1.1.1.2h-.2l-1.1 4.5c-.1.2-.3.6-.8.4 0 0-1.2-.3-1.2-.3l-.8 2 2.2.5 1.2.3-.7 2.8 1.7.4.7-2.8c.5.1 1 .3 1.4.4l-.7 2.7 1.7.4.7-2.8c2.9.5 5 .3 5.9-2.3.7-2-.1-3.2-1.5-3.9 1.1-.2 1.9-1 2.1-2.5zm-3.8 5.3c-.5 2-3.9.9-5 .6l.9-3.5c1.1.3 4.6.9 4.1 2.9zm.5-5.4c-.5 1.8-3.4.9-4.3.7l.8-3.2c.9.2 3.9.7 3.5 2.5z"/></svg>`,
-  BTS: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="20" height="20" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#35baeb"/><text x="16" y="21" text-anchor="middle" font-size="13" font-weight="bold" fill="#fff" font-family="sans-serif">BTS</text></svg>`,
-};
-
-export function coinIcon(code: string, color: string, size = 20): string {
-  if (coinIconSvg[code]) return `<span class="asset-pill-icon">${coinIconSvg[code]}</span>`;
-  // Generic: colored circle with first 2 letters
-  const label = code.slice(0, 2);
-  return `<span class="asset-pill-dot" style="background:${color};font-size:9px;font-weight:700;width:${size}px;height:${size}px;">${label}</span>`;
-}
 
 export const clientIcons = {
   snowflake: bi('<path d="M8 1v14M2 4.5l12 7M2 11.5l12-7M6 2l2 2 2-2m-4 12 2-2 2 2M2 7l3-1-.5-3M14 9l-3 1 .5 3M2 9l3 1-.5 3M14 7l-3-1 .5-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>', 16),
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
   candlesticks: bi('<path d="M3 5v2m0 5v2m5-13v3m0 6v3m5-11v3m0 5v2" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/><rect x="1.5" y="7" width="3" height="5" rx=".5"/><rect x="6.5" y="4" width="3" height="6" rx=".5"/><rect x="11.5" y="5" width="3" height="5" rx=".5"/>'),
-  tradeArrow: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5"/>'),
   wallet: bi('<path d="M12.136.326A1.5 1.5 0 0 1 14 1.78V3h.5A1.5 1.5 0 0 1 16 4.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 13.5v-9a1.5 1.5 0 0 1 1.432-1.499zM5.562 3H13V1.78a.5.5 0 0 0-.621-.484zM1.5 4a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5z"/>'),
   history: bi('<path d="M8.515 1.019A7 7 0 0 0 8 1V0a8 8 0 0 1 .589.022zm2.004.45a7 7 0 0 0-.985-.299l.219-.976q.576.129 1.126.342zm1.37.71a7 7 0 0 0-.439-.27l.493-.87a8 8 0 0 1 .979.654l-.615.789a7 7 0 0 0-.418-.302zm1.834 1.79a7 7 0 0 0-.653-.796l.724-.69q.406.429.747.91zm.744 1.352a7 7 0 0 0-.214-.468l.893-.45a8 8 0 0 1 .45 1.088l-.95.313a7 7 0 0 0-.179-.483m.53 2.507a7 7 0 0 0-.1-1.025l.985-.17q.1.58.116 1.17zm-.131 1.538q.05-.254.081-.51l.993.123a8 8 0 0 1-.23 1.155l-.964-.267q.069-.247.12-.501m-.952 2.379q.276-.436.486-.908l.914.405q-.24.54-.555 1.038zm-.964 1.205q.183-.183.35-.378l.758.653a8 8 0 0 1-.401.432z"/><path d="M8 1a7 7 0 1 0 4.95 11.95l.707.707A8.001 8.001 0 1 1 8 0z"/><path d="M7.5 3a.5.5 0 0 1 .5.5v5.21l3.248 1.856a.5.5 0 0 1-.496.868l-3.5-2A.5.5 0 0 1 7 9V3.5a.5.5 0 0 1 .5-.5"/>'),
   journal: bi('<path d="M5 10.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5"/><path d="M3 0h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-1h1v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v1H1V2a2 2 0 0 1 2-2"/><path d="M1 5v-.5a.5.5 0 0 1 1 0V5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1zm0 3v-.5a.5.5 0 0 1 1 0V8h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1zm0 3v-.5a.5.5 0 0 1 1 0v.5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1z"/>'),
@@ -70,8 +58,10 @@ const freezeLabels = {
 
 export function renderRealAccountBalance(home: Home) {
   const freeze = walletFreeze(home.wallet.available, home.profile);
-  const badge = freeze.kind === 'none' ? '' : `<span class="balance-freeze-badge">${clientIcons.snowflake}${freezeLabels[freeze.kind]}</span>`;
-  return `<span class="balance-label">Real Account</span><span class="balance-val">${esc(fmtMoney(home.wallet.available, home))}</span>${badge}`;
+  const label = freeze.kind === 'none' ? 'Real Account'
+    : freeze.kind === 'withdrawals' ? freezeLabels.withdrawals : freezeLabels.account;
+  const freezeState = freeze.kind === 'none' ? '' : ` data-freeze="${freeze.kind}"`;
+  return `<span class="balance-label"${freezeState}>${label}</span><span class="balance-val">${esc(fmtMoney(home.wallet.available, home))}</span>`;
 }
 
 export function renderAssetsBalance(home: Home) {
@@ -94,13 +84,17 @@ export function clientWithdrawalRestriction(home: Home) {
   if (freeze.kind === 'account') return 'Account is frozen. Contact support.';
   if (freeze.kind === 'withdrawals') return 'Withdrawals are frozen for this account.';
   if (!home.profile.withdrawalEnabled) return 'Withdrawals are paused for this account.';
-  const rep = Number(home.profile.reputationScore ?? 100);
-  if (rep < 100) return `Withdrawals require a Reputation Score of at least 100 (current: ${rep}).`;
   if (freeze.kind === 'amount' && freeze.available === 0) return 'There is no unfrozen balance available for withdrawal.';
   return '';
 }
 
 export const formatPair = (sym: string) => sym.replace(/USDT$/, '/USD');
+
+export function renderTradePair(symbol: string, size = 18) {
+  const asset = findAsset(symbol);
+  const label = esc(formatPair(symbol));
+  return asset ? `<span class="coin-label">${coinIcon(asset.code, size)}${label}</span>` : label;
+}
 export const formatDurationLabel = (sec: number) => sec >= 300 && sec % 60 === 0 ? `${sec / 60} min` : `${sec} sec`;
 
 export const durationChoices = [
@@ -244,13 +238,13 @@ export function validateBankDetails(details: Record<string, string>): string {
   return '';
 }
 
-export const clientNavItems: { tab: string; hash: string; label: string; icon: string }[] = [
-  { tab: 'market', hash: 'trade', label: 'Trade', icon: clientIcons.trade },
-  { tab: 'wallet', hash: 'wallet', label: 'Assets', icon: clientIcons.wallet },
-  { tab: 'history', hash: 'transactions', label: 'Transaction History', icon: clientIcons.history },
-  { tab: 'tradeHistory', hash: 'history', label: 'Trade History', icon: clientIcons.journal },
-  { tab: 'leaderboard', hash: 'leaderboard', label: 'Leaderboard', icon: clientIcons.trophy },
-  { tab: 'profile', hash: 'settings', label: 'Settings', icon: clientIcons.settings },
+const clientNavItems: { tab: ClientState['activeTab']; label: string; icon: string }[] = [
+  { tab: 'market', label: 'Trade', icon: clientIcons.trade },
+  { tab: 'wallet', label: 'Assets', icon: clientIcons.wallet },
+  { tab: 'history', label: 'Transaction History', icon: clientIcons.history },
+  { tab: 'tradeHistory', label: 'Trade History', icon: clientIcons.journal },
+  { tab: 'leaderboard', label: 'Leaderboard', icon: clientIcons.trophy },
+  { tab: 'profile', label: 'Settings', icon: clientIcons.settings },
 ];
 
 export type ClientState = {
@@ -320,6 +314,8 @@ export function createLeaderboardData() {
 
 export function buildClientShellHtml(home: Home, state: ClientState) {
   const chartPresentation = clientChartPresentation(state.chartMode);
+  const tradable = isTradableAsset(state.selected);
+  const tradeDisabled = !home.profile.tradeEnabled || !tradable;
   return `
   <div id="app-interface" class="${state.activeTab === 'market' ? 'market-active' : 'content-expanded'}">
     <div class="top-bar">
@@ -332,9 +328,9 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
 
       <div class="top-right-controls">
-        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets" aria-label="Choose asset">
-          ${coinIcon(state.selected.code, state.selected.color)}
-          <span id="headerAsset">${esc(state.selected.code.slice(0, 2) + '...')}</span>
+        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets" data-selected-coin aria-label="Choose asset">
+          ${coinIcon(state.selected.code)}
+          <span id="headerAsset">${esc(state.selected.code)}</span>
           ${clientIcons.chevronDown}
         </button>
 
@@ -415,8 +411,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       <div id="tv_chart_container">
         <div class="chart-shell">
           <div class="chart-toolbar">
-            <div class="chart-market-info">
-              <div class="chart-symbol-mark">${clientIcons.tradeArrow}</div>
+            <div class="chart-market-info" data-selected-coin>
+              ${coinIcon(state.selected.code, 34)}
               <div>
                 <div class="chart-market-name" id="chartMarketName">${esc(formatPair(state.selected.symbol))}</div>
                 <div class="chart-market-subtitle">${chartPresentation.subtitle}</div>
@@ -438,7 +434,7 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
             <div class="chart-live-marker" id="chartLiveMarker" aria-hidden="true"></div>
             <span id="market-price" hidden></span>
           </div>
-          <div class="chart-status"><span class="chart-live-dot"></span><span id="feed-status">Live market data</span></div>
+          <div class="chart-status"><span class="chart-live-dot"${tradable ? '' : ' hidden'}></span><span id="feed-status">${tradable ? 'Live market data' : 'Market data unavailable'}</span></div>
         </div>
       </div>
 
@@ -461,8 +457,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <label class="control-label">Asset</label>
         <div class="iq-dropdown" id="assetDrop">
           <div class="asset-select-head" data-action="client-toggle-asset-drop">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span class="asset-pill-dot" id="assetDotSmall" style="background:${state.selected.color}">${esc(state.selected.code.slice(0, 2))}</span>
+            <div class="coin-label" data-selected-coin>
+              ${coinIcon(state.selected.code, 18)}
               <span id="selectedAssetName">${esc(formatPair(state.selected.symbol))}</span>
             </div>
             ${clientIcons.chevronDown}
@@ -511,11 +507,11 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
 
       <div class="trade-buttons">
-        <button type="button" class="btn-trade-iq btn-call" data-action="client-trade-click" data-dir="up" ${!home.profile.tradeEnabled ? 'disabled' : ''}>
+        <button type="button" class="btn-trade-iq btn-call" data-action="client-trade-click" data-dir="up" ${tradeDisabled ? 'disabled' : ''}>
           <div style="text-align:left;line-height:1.15;"><span class="btn-sub">HIGHER</span>BUY</div>
           ${clientIcons.upRight}
         </button>
-        <button type="button" class="btn-trade-iq btn-put" data-action="client-trade-click" data-dir="down" ${!home.profile.tradeEnabled ? 'disabled' : ''}>
+        <button type="button" class="btn-trade-iq btn-put" data-action="client-trade-click" data-dir="down" ${tradeDisabled ? 'disabled' : ''}>
           <div style="text-align:left;line-height:1.15;"><span class="btn-sub">LOWER</span>SELL</div>
           ${clientIcons.downRight}
         </button>
@@ -621,7 +617,7 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
       <div class="wallet-box-card">
         <h5 class="wallet-box-title">Deposit Funds</h5>
         <div class="method-btn-group">
-          <button type="button" class="method-chip-btn${isBsc ? ' active' : ''}" id="btnMethodUSDT" data-action="client-dep-method" data-method="USDT_BSC">USDT (BNB Smart Chain)</button>
+          <button type="button" class="method-chip-btn${isBsc ? ' active' : ''}" id="btnMethodUSDT" data-action="client-dep-method" data-method="USDT_BSC"><span class="coin-label">${coinIcon('USDT', 16)}<span>USDT (BNB Smart Chain)</span></span></button>
           <button type="button" class="method-chip-btn${!isBsc ? ' active' : ''}" id="btnMethodUPI" data-action="client-dep-method" data-method="UPI">UPI / BANK</button>
         </div>
 
@@ -688,7 +684,7 @@ export function buildWalletTabHtml(home: Home, state: ClientState) {
             ${!home.profile.hasWithdrawalPin ? '<div style="font-size:11px;color:#e8b86d;margin-top:5px;">Tip: Set your Withdrawal PIN in Settings before withdrawing.</div>' : ''}
           </div>
 
-          <button type="submit" class="replica-primary-btn" ${withdrawalRestriction ? 'disabled' : ''}>SUBMIT WITHDRAWAL</button>
+          <button type="submit" class="replica-primary-btn"${withdrawalRestriction ? ' disabled' : ''}${withdrawalReputationWarning(home.profile.reputationScore) ? ' formnovalidate' : ''}>SUBMIT WITHDRAWAL</button>
         </form>
       </div>
     </div>
@@ -889,7 +885,7 @@ export function buildTradeHistoryHtml(home: Home, state: ClientState) {
             <tr>
               <td data-label="Date">${esc(dateTime(tr.createdAt))}</td>
               <td data-label="Trade ID">${esc(shortId)}</td>
-              <td data-label="Asset">${esc(formatPair(String(tr.symbol || '')))}</td>
+              <td data-label="Asset">${renderTradePair(String(tr.symbol || ''), 16)}</td>
               <td data-label="Dir">${dir}</td>
               <td data-label="Amount">${esc(fmtMoney(tr.stake, home))}</td>
               <td data-label="Start Price">${esc(Number(tr.entry || 0).toFixed(4))}</td>
@@ -980,11 +976,15 @@ export function buildLeaderboardHtml(home: Home, state: ClientState) {
   </div>`;
 }
 
+export function renderReputationValue(score?: number) {
+  return `<span>${Number(score ?? minimumWithdrawalReputation)}</span>${withdrawalReputationWarning(score)
+    ? '<span class="prof-reputation-warning">Refill points!</span>' : ''}`;
+}
+
 export function buildProfileTabHtml(home: Home) {
   const p = home.profile;
   const shortUid = String(p.uid || '').slice(0, 7).toUpperCase();
   const vipLabel = String(p.vipLevel || 'Unverified');
-  const rep = Number(p.reputationScore ?? 100);
   const freeze = walletFreeze(home.wallet.available, p);
 
   return `
@@ -996,7 +996,10 @@ export function buildProfileTabHtml(home: Home) {
         <div class="prof-stats-grid">
           <div class="prof-stat-box"><div class="prof-stat-label">UID</div><div class="prof-stat-val" id="dispUid">${esc(shortUid)}</div></div>
           <div class="prof-stat-box"><div class="prof-stat-label">VIP Level</div><div class="prof-stat-val" style="color:#e8b86d;" id="dispVip">${esc(vipLabel)}</div></div>
-          <div class="prof-stat-box"><div class="prof-stat-label">Reputation</div><div class="prof-stat-val" style="color:var(--iq-green);" id="dispRep">${rep}</div></div>
+          <div class="prof-stat-box">
+            <div class="prof-stat-label">Reputation</div>
+            <div class="prof-stat-val prof-reputation-value" id="dispRep">${renderReputationValue(p.reputationScore)}</div>
+          </div>
           <div class="prof-stat-box"><div class="prof-stat-label">Status</div><div class="prof-stat-val" id="dispStatus" style="color:${freeze.kind === 'none' ? 'var(--iq-green)' : 'var(--iq-red)'};">${freeze.kind === 'none' ? 'ACTIVE' : freezeLabels[freeze.kind].toUpperCase()}</div></div>
           ${freeze.kind === 'amount' ? `<div class="prof-stat-box" style="grid-column:1 / -1;border-color:rgba(255,93,114,0.45);"><div class="prof-stat-label" style="color:var(--iq-red);">Frozen Amount</div><div class="prof-stat-val" style="color:var(--iq-red);">${esc(fmtMoney(freeze.frozenBalance, home))}</div></div>` : ''}
         </div>
@@ -1166,38 +1169,49 @@ export function updateNotifBanners(banners: HTMLElement, bell: HTMLElement | nul
 }
 
 export function renderAssetDropdownAndGrid(state: ClientState) {
-  const dropItems = assets.map(a => {
-    const q = state.quotes.get(a.symbol);
-    const price = q ? q.price : demoPrice(a, Date.now());
-    const chg = q ? q.change : (((a.base % 7) - 3) * 0.8);
-    const clr = chg >= 0 ? 'var(--iq-green)' : 'var(--iq-red)';
-    return `
+  const now = Date.now();
+  const markets = assets.map(asset => {
+    if (!isTradableAsset(asset)) {
+      return { asset, subtitle: asset.name, price: '—', change: 'View only', color: 'var(--iq-muted)' };
+    }
+    const quote = state.quotes.get(asset.symbol);
+    const price = quote?.price ?? demoPrice(asset, now);
+    const change = quote?.change ?? ((asset.base % 7) - 3) * 0.8;
+    return {
+      asset,
+      subtitle: asset.symbol,
+      price: price < 1 ? price.toFixed(4) : price.toFixed(2),
+      change: (change >= 0 ? '+' : '') + change.toFixed(2) + '%',
+      color: change >= 0 ? 'var(--iq-green)' : 'var(--iq-red)',
+    };
+  });
+
+  const dropItems = markets.map(({ asset: a, subtitle, price, change, color }) => `
       <div class="asset-select-item${a.symbol === state.selected.symbol ? ' active' : ''}" data-action="asset" data-id="${esc(a.symbol)}">
-        <div>
-          <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
-          <div style="font-size:10px;color:var(--iq-muted);font-weight:700;">${esc(a.symbol)}</div>
+        <div class="coin-label">
+          ${coinIcon(a.code)}
+          <div>
+            <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
+            <div style="font-size:10px;color:var(--iq-muted);font-weight:700;">${esc(subtitle)}</div>
+          </div>
         </div>
         <div style="text-align:right;">
-          <div style="font-family:monospace;font-weight:800;font-size:12px;color:${clr};">${price < 1 ? price.toFixed(4) : price.toFixed(2)}</div>
-          <div style="font-size:10px;font-weight:800;color:${clr};">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</div>
+          <div style="font-family:monospace;font-weight:800;font-size:12px;color:${color};">${price}</div>
+          <div style="font-size:10px;font-weight:800;color:${color};">${change}</div>
         </div>
-      </div>`;
-  }).join('');
+      </div>`).join('');
 
-  const gridItems = assets.map(a => {
-    const q = state.quotes.get(a.symbol);
-    const price = q ? q.price : demoPrice(a, Date.now());
-    const chg = q ? q.change : (((a.base % 7) - 3) * 0.8);
-    const clr = chg >= 0 ? 'var(--iq-green)' : 'var(--iq-red)';
-    return `
+  const gridItems = markets.map(({ asset: a, price, change, color }) => `
       <div class="coin-flash-item" data-action="asset" data-id="${esc(a.symbol)}">
-        <div>
-          <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
-          <div style="font-family:monospace;font-weight:800;font-size:12px;color:${clr};">${price < 1 ? price.toFixed(4) : price.toFixed(2)}</div>
+        <div class="coin-label">
+          ${coinIcon(a.code)}
+          <div>
+            <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
+            <div style="font-family:monospace;font-weight:800;font-size:12px;color:${color};">${price}</div>
+          </div>
         </div>
-        <div style="font-size:11px;font-weight:800;color:${clr};">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</div>
-      </div>`;
-  }).join('');
+        <div style="font-size:11px;font-weight:800;color:${color};">${change}</div>
+      </div>`).join('');
 
   return { dropItems, gridItems };
 }

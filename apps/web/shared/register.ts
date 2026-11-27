@@ -7,10 +7,11 @@ const submit = form.querySelector<HTMLButtonElement>('#regBtn')!;
 const status = form.querySelector<HTMLElement>('#registerStatus')!;
 const password = form.querySelector<HTMLInputElement>('#password')!;
 const confirmation = form.querySelector<HTMLInputElement>('#confirmPass')!;
+const inviteCode = form.querySelector<HTMLInputElement>('#inviteCode')!;
 const visibility = form.querySelector<HTMLButtonElement>('#togglePassBtn')!;
 
 let client: Awaited<ReturnType<typeof connect>> | undefined;
-let account: { user: User; name: string; inviteCode: string } | undefined;
+let account: { user: User; name: string } | undefined;
 
 visibility.addEventListener('click', () => {
   const showing = password.type === 'text';
@@ -58,23 +59,27 @@ form.addEventListener('submit', async event => {
     if (!account) {
       const email = String(data.get('email')).trim();
       const name = String(data.get('name')).trim();
-      const inviteCode = String(data.get('inviteCode')).trim();
       const { user } = await createUserWithEmailAndPassword(client.auth, email, password.value);
-      account = { user, name, inviteCode };
+      account = { user, name };
+      for (const field of fields.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')) {
+        if (field !== inviteCode) field.disabled = true;
+      }
     }
 
     if (account.user.displayName !== account.name) {
       await updateProfile(account.user, { displayName: account.name });
     }
-    await client.call('access', { name: account.name, inviteCode: account.inviteCode });
-    location.replace('/login.html#trade');
+    await client.call('access', { name: account.name, inviteCode: inviteCode.value.trim() });
+    location.replace('/trade');
   } catch (error) {
-    status.textContent = account
-      ? 'Your account is created. Retry to finish setting up your workspace.'
-      : signupError(error);
-    fields.disabled = !!account;
+    const invalidInvite = account && error && typeof error === 'object' && 'code' in error && error.code === 'functions/invalid-argument';
+    status.textContent = invalidInvite
+      ? 'This 2000 invitation code is invalid or has been replaced. Enter a current code or leave it blank to continue.'
+      : account ? 'Your account is created. Retry to finish setting up your workspace.' : signupError(error);
+    fields.disabled = false;
     submit.disabled = false;
     submit.textContent = account ? 'Retry workspace setup' : 'Create account';
+    if (invalidInvite) inviteCode.focus();
   }
 });
 
