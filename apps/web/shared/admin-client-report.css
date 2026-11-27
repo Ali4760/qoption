@@ -72,7 +72,7 @@
   letter-spacing: .055em;
   user-select: none;
 }
-#details .report-watermark img { width: 1em; height: 1em; object-fit: contain; }
+#details .report-watermark img { width: 1.16em; height: 1.16em; object-fit: contain; }
 
 #details .report-heading {
   margin-bottom: 18px;

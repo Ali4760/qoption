@@ -98,10 +98,10 @@ function reportDocument(report: ClientReport, logo: string): TDocumentDefinition
     images: { qoptionLogo: logo },
     background: (_page, pageSize) => ({
       stack: [
-        { image: 'qoptionLogo', width: 76, alignment: 'center', opacity: .085, margin: [0, 0, 0, 4] },
+        { image: 'qoptionLogo', width: 88, alignment: 'center', opacity: .085, margin: [0, 0, 0, 4] },
         { text: 'QOPTION', fontSize: 64, bold: true, alignment: 'center', color: '#21466c', opacity: .085 },
       ],
-      margin: [0, (pageSize.height - 155) / 2, 0, 0],
+      margin: [0, (pageSize.height - 167) / 2, 0, 0],
     }),
     defaultStyle: { fontSize: 10, color: colors.ink, lineHeight: 1.18 },
     styles: {
