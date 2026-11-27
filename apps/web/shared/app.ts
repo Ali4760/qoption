@@ -263,7 +263,7 @@ function definition(entries: [string, unknown][]) {
 function showAuth(notice = '') {
   stop();
   if (!admin) {
-    root.innerHTML = userLogin({ registration, signedIn: !!person, remember: rememberPreference(), showQuickStart: emulator, notice }) + dialogShell;
+    root.innerHTML = userLogin({ registration, signedIn: !!person, remember: rememberPreference(true), showQuickStart: emulator, notice }) + dialogShell;
     void attachLoginChart();
     return;
   }
@@ -274,7 +274,7 @@ function showAuth(notice = '') {
     '</h1><p>' + (admin ? 'Review client accounts, approve funding requests and monitor trading activity.' : 'Explore live crypto markets, place trades and follow each result in one workspace.') +
     '</p><span class="pill practice">Live terminal</span></div><section class="auth-card"><h2>' + heading + '</h2>' +
     (notice ? '<p class="error">' + esc(notice) + '</p>' : '') + (!person ? '<form data-form="auth">' + fields +
-      '<button class="button">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>' : '') + '<div class="button-row">' +
+      '<button class="button" type="submit" aria-live="polite">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>' : '') + '<div class="button-row">' +
     (!person && !admin ? '<button class="button secondary compact" data-action="registration">' + (registration ? 'Back to sign in' : 'Create an account') + '</button>' : '') +
     (!person ? '<button class="button secondary compact" data-action="reset">Reset password</button>' : '') +
     (person && admin && !emulator ? '<button class="button secondary compact" data-action="enroll">Set up authenticator</button>' : '') +
@@ -800,6 +800,9 @@ async function start() {
   try {
     api = await connect(admin ? 'admin' : 'user', expireAdminSession);
     onAuthStateChanged(api.auth, async user => {
+      const signInButton = user ? root.querySelector<HTMLButtonElement>(
+        '[data-form="auth"] button[data-sign-in-state="pending"], dialog[open] [data-form="mfa"] button[data-sign-in-state="pending"]',
+      ) : null;
       resetWorkspaceSession(user);
       const latest = authVersion;
       if (!user) {
@@ -808,8 +811,10 @@ async function start() {
         void finishStartup(root);
         return;
       }
-      showStartup(root);
-      root.replaceChildren();
+      if (!signInButton) {
+        showStartup(root);
+        root.replaceChildren();
+      }
       try {
         if (admin) {
           const data = await api.call<{ roles: string[]; serverTime?: number; sessionExpiresAt?: number }>('admin.access');
@@ -826,6 +831,14 @@ async function start() {
           const data = await api.call<Home>('access');
           if (latest !== authVersion) return;
           setHome(data);
+        }
+        if (signInButton?.isConnected) {
+          signInButton.dataset.signInState = 'granted';
+          signInButton.textContent = 'Access granted';
+          if (signInButton.form) showFormStatus(signInButton.form, '');
+          await new Promise<void>(resolve => window.setTimeout(resolve, 600));
+          if (latest !== authVersion) return;
+          showStartup(root);
         }
         access = true; shell(); startRealtimeSync();
         if (admin) void refreshAdminBadges();
@@ -2489,11 +2502,15 @@ async function signIn(values: Record<string, FormDataEntryValue>) {
     resolver = getMultiFactorResolver(api.auth, error as MultiFactorError);
     if (!resolver.hints.some(hint => hint.factorId === TotpMultiFactorGenerator.FACTOR_ID)) throw new Error('Use an account with an authenticator.');
     dialog('Authenticator code', '<form class="stack" data-form="mfa"><label>Six-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label>' +
-      '<button class="button">Continue</button>' + formStatus() + '</form>');
+      '<button class="button" type="submit" aria-live="polite">Continue</button>' + formStatus() + '</form>');
   }
 }
 async function accountForm(op: string, values: Record<string, FormDataEntryValue>, form: HTMLFormElement) {
-  if (op === 'auth') { await signIn(values); showFormStatus(form, ''); return true; }
+  if (op === 'auth') {
+    await signIn(values);
+    if (!api.auth.currentUser) showFormStatus(form, '');
+    return true;
+  }
   if (op === 'reset') {
     try { await sendPasswordResetEmail(api.auth, String(values.email)); }
     catch (error) {
@@ -2521,7 +2538,9 @@ root.addEventListener('submit', async event => {
   event.preventDefault(); if (form.dataset.busy) return;
   const values = Object.fromEntries(new FormData(form));
   const buttons = Array.from(form.querySelectorAll<HTMLButtonElement>('button')).filter(button => !button.disabled);
+  const signInButton = op === 'mfa' || (op === 'auth' && !registration) ? form.querySelector<HTMLButtonElement>('button[type="submit"]') : null;
   form.dataset.busy = 'true';
+  if (signInButton) signInButton.dataset.signInState = 'pending';
   buttons.forEach(button => { button.disabled = true; });
   showFormStatus(form, 'Working…');
   const started = version;
@@ -2735,8 +2754,12 @@ root.addEventListener('submit', async event => {
     else showFormStatus(form, errorMessage(error));
   }
   finally {
-    delete form.dataset.busy;
-    buttons.forEach(button => { button.disabled = false; });
+    // Keep the sign-in form busy until the auth listener finishes the workspace access check.
+    if (!signInButton || !api.auth.currentUser) {
+      delete form.dataset.busy;
+      buttons.forEach(button => { button.disabled = false; });
+      if (signInButton) delete signInButton.dataset.signInState;
+    }
     if (op === 'client.withdraw' && home) updateWithdrawalRestriction(home);
   }
 });

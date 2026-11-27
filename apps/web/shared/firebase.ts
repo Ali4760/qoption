@@ -8,8 +8,11 @@ export const emulator = import.meta.env.DEV || import.meta.env.MODE === 'emulato
 
 const rememberKey = 'qoption-remember-user';
 
-export function rememberPreference() {
-  try { return localStorage.getItem(rememberKey) === 'true'; }
+export function rememberPreference(defaultRemember = false) {
+  try {
+    const saved = localStorage.getItem(rememberKey);
+    return saved === null ? defaultRemember : saved === 'true';
+  }
   catch { return false; }
 }
 

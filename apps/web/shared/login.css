@@ -95,6 +95,10 @@
   min-height: 50px;
   width: 100%;
 }
+@media (prefers-reduced-motion: no-preference) {
+  button[data-sign-in-state] { transition: opacity 160ms ease; }
+}
+button[data-sign-in-state="granted"] { opacity: 1; }
 .login-alert {
   margin: 0 0 14px;
   padding: 9px 11px;

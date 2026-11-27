@@ -23,7 +23,7 @@ export function userLogin({ registration, signedIn, remember, showQuickStart, no
     '" required><button type="button" data-action="password-visibility" aria-controls="login-password" aria-label="Show password">Show</button></div>' +
     '<div class="login-options"><label class="check-row"><input type="checkbox" name="remember"' + (remember ? ' checked' : '') + '>Remember me</label>' +
     (!registration ? '<button class="login-link" type="button" data-action="reset">Forgot password?</button>' : '') + '</div>' +
-    '<button class="button login-submit" type="submit">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>';
+    '<button class="button login-submit" type="submit" aria-live="polite">' + (registration ? 'Create account' : 'Sign in') + '</button>' + formStatus() + '</form>';
 
   const alternate = !signedIn ? '<p class="login-alternate">' + (registration ? 'Already have an account?' : 'New to Qoption?') +
     ' <a href="' + (registration ? '/login' : '/register') + '" class="login-link">' + (registration ? 'Sign in' : 'Create an account') + '</a></p>' : '';
