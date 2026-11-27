@@ -24,7 +24,7 @@ import {
   buildClientShellHtml, buildLeaderboardHtml, buildProfileTabHtml, buildTradeHistoryHtml, buildTransactionHistoryHtml, buildWalletTabHtml,
   clientChartPresentation, clientIcons, clientWithdrawalRestriction, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
   fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml,
-  renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderReputationValue, renderTradePair, renderTxnDetailHtml,
+  renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderReputationValue, renderTxnDetailHtml,
   renderTradeAssetSelector,
   updateNotifBanners, validateBankDetails, type ClientState,
 } from './client-ui';
@@ -32,6 +32,7 @@ import {
 const root = document.querySelector<HTMLElement>('#app')!;
 const admin = root.dataset.audience === 'admin';
 const first = admin ? 'overview' : 'trade';
+const DEFAULT_TRADE_FRAME = '15m';
 let api: Awaited<ReturnType<typeof connect>>;
 let person: User | null;
 let home: Home | undefined;
@@ -39,7 +40,7 @@ let roles: string[] = [];
 let access = false, version = 0, authVersion = 0, clockOffset = 0;
 let adminSessionExpiresAt = 0, adminSessionTimer = 0;
 let adminSignInNotice = '';
-let route = first, selected: Asset = assets[0], frame = '1m';
+let route = first, selected: Asset = assets[0], frame = DEFAULT_TRADE_FRAME;
 let adminLocation = adminRouteForPath(location.pathname);
 type AdminClientIdentity = { uid: string; clientNumber: number };
 let adminClient: AdminClientIdentity | undefined;
@@ -79,8 +80,8 @@ const clientState: ClientState = {
   depositMethod: 'USDT_BSC',
   depositPresetAmount: 3000,
   depositReferenceNumber: '',
-  selected: assets[0],
-  frame: '1m',
+  selected,
+  frame,
   chartMode: 'candles',
   selDur: DEFAULT_TRADE_DURATION,
   selProfit: profitForDuration(DEFAULT_TRADE_DURATION),
@@ -464,7 +465,7 @@ function startActiveTradeCountdown(trade: { id: string; symbol: string; directio
   card.innerHTML = `
     <h5 style="color:#fff;margin:0 0 18px;font-weight:800;letter-spacing:.06em;">TRADE ACTIVE</h5>
     <div class="blind-label">ASSET</div>
-    <div class="blind-val">${renderTradePair(trade.symbol)}</div>
+    <div class="blind-val">${esc(formatPair(trade.symbol))}</div>
     <div class="blind-label">DIRECTION</div>
     <div class="blind-val" style="color:${isUp ? 'var(--iq-green)' : 'var(--iq-red)'};">${isUp ? 'BUY' : 'SELL'}</div>
     <div class="blind-timer" id="blindTimer">00:00</div>
@@ -509,7 +510,7 @@ function startActiveTradeCountdown(trade: { id: string; symbol: string; directio
           resultCard.innerHTML = `
             <h5 style="color:var(--iq-muted);margin:0 0 12px;font-weight:800;">TRADE RESULT</h5>
             <h1 style="font-weight:900;color:${color};margin:0 0 8px;font-size:34px;">${esc(fmtSignedMoney(pnl, home))}</h1>
-            <div style="font-weight:800;margin-bottom:20px;color:#fff;">${renderTradePair(String(settled.symbol || trade.symbol))}</div>
+            <div style="font-weight:800;margin-bottom:20px;color:#fff;">${esc(formatPair(String(settled.symbol || trade.symbol)))}</div>
             <button type="button" class="replica-primary-btn" data-action="client-close-result">CONTINUE</button>`;
         } else {
           resultOverlay?.classList.remove('open');
@@ -1825,7 +1826,7 @@ root.addEventListener('click', async event => {
           }
           selected = asset;
           clientState.selected = asset;
-          if (asset.code === 'BTG') frame = '1d';
+          frame = asset.code === 'BTG' ? '1d' : DEFAULT_TRADE_FRAME;
           root.querySelector('#assetList')?.classList.remove('show');
           if (!admin && clientState.activeTab === 'assets') go(clientPaths.market);
           updateMarket();
