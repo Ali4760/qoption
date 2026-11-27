@@ -19,11 +19,12 @@ export const assets = [
   { symbol: 'ALGOUSDT', name: 'Algorand', code: 'ALGO', base: 0.178, color: '#7892aa' },
   { symbol: 'FILUSDT', name: 'Filecoin', code: 'FIL', base: 5.25, color: '#0090ff' },
   { symbol: 'VETUSDT', name: 'VeChain', code: 'VET', base: 0.035, color: '#15bdff' },
-  { symbol: 'BTGUSDT', name: 'Bitcoin Gold', code: 'BTG', color: '#eba809', viewOnly: true },
+  { symbol: 'BTGUSDT', name: 'Openverse Network', code: 'BTG', color: '#eba809', gatePair: 'BTG_USDT' },
 ] as const;
 
 export type Asset = typeof assets[number];
-export type TradableAsset = Exclude<Asset, { viewOnly: true }>;
+export type GateAsset = Extract<Asset, { gatePair: string }>;
+export type DemoAsset = Exclude<Asset, GateAsset>;
 export type Point = { time: number; price: number };
 export const durations = [30, 60, 120, 180, 300] as const;
 export const profitPercent = 80;
@@ -37,12 +38,12 @@ export function findAsset(symbol: unknown) {
   return assets.find(asset => asset.symbol === symbol);
 }
 
-export function isTradableAsset(asset: Asset): asset is TradableAsset {
-  return !('viewOnly' in asset && asset.viewOnly);
+export function isGateAsset(asset: Asset): asset is GateAsset {
+  return 'gatePair' in asset;
 }
 
 // A versioned, deterministic simulation. Times are UTC Unix milliseconds.
-export function demoPrice(asset: TradableAsset, time: number) {
+export function demoPrice(asset: DemoAsset, time: number) {
   const bucket = Math.floor(time / 2000);
   const seed = asset.base % 23;
   const drift = Math.sin(bucket / 843 + seed) * 0.016 + Math.sin(bucket / 127 + seed) * 0.012;
@@ -50,7 +51,7 @@ export function demoPrice(asset: TradableAsset, time: number) {
   return Math.round(asset.base * (1 + drift + cycle) * 1e6) / 1e6;
 }
 
-export function demoHistory(asset: TradableAsset, intervalMs: number, time = Date.now(), size = 80): Point[] {
+export function demoHistory(asset: DemoAsset, intervalMs: number, time = Date.now(), size = 80): Point[] {
   const rounded = Math.floor(time / intervalMs) * intervalMs;
   return Array.from({ length: size }, (_, i) => {
     const at = rounded - (size - i - 1) * intervalMs;

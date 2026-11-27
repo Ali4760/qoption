@@ -4,7 +4,8 @@ import algo from '../assets/coins/algo.svg?no-inline';
 import atom from '../assets/coins/atom.svg?no-inline';
 import avax from '../assets/coins/avax.svg?no-inline';
 import btc from '../assets/coins/btc.svg?no-inline';
-import btg from '../assets/coins/btg.svg?no-inline';
+import btcRound from '../assets/coins/btc-round.svg?no-inline';
+import btg from '../assets/coins/btg-openverse.png?no-inline';
 import bts from '../assets/coins/bts.svg?no-inline';
 import doge from '../assets/coins/doge.svg?no-inline';
 import dot from '../assets/coins/dot.svg?no-inline';
@@ -50,5 +51,13 @@ export const coinLogoUrls = {
 } satisfies Record<CoinCode, string>;
 
 export function coinIcon(code: CoinCode, size = 20) {
-  return `<img class="coin-logo" src="${coinLogoUrls[code]}" width="${size}" height="${size}" alt="">`;
+  return coinImage(coinLogoUrls[code], size);
+}
+
+export function tradeCoinIcon(code: Asset['code'], size = 20) {
+  return coinImage(code === 'BTC' ? btcRound : coinLogoUrls[code], size);
+}
+
+function coinImage(src: string, size: number) {
+  return `<img class="coin-logo" src="${src}" width="${size}" height="${size}" alt="">`;
 }

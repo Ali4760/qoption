@@ -42,7 +42,7 @@ async function checkAdminSession(staff, trader, uid) {
   assert.ok(access.sessionExpiresAt > access.serverTime);
   const expiredClaims = { ...claims, auth_time: Math.floor(Date.now() / 1000) - 1801 };
   const expired = { idToken: [header, Buffer.from(JSON.stringify(expiredClaims)).toString('base64url'), signature].join('.') };
-  for (const op of ['admin.access', 'admin.dashboard', 'admin.clients', 'admin.client', 'admin.client.update']) {
+  for (const op of ['admin.access', 'admin.dashboard', 'admin.clients', 'admin.client.resolve', 'admin.client', 'admin.client.update']) {
     await call(expired, op, { uid }, 401);
   }
   for (const [account, status] of [[staff, 200], [expired, 403], [trader, 403]]) {
@@ -82,6 +82,9 @@ async function checkInvitations(staff, trader, testClientUids) {
   }
   const { rows } = await call(bonusClient, 'list', { list: 'ledger' });
   assert.deepEqual(rows.map(row => [row.kind, row.availableDelta]), [['Invitation bonus', 200000]]);
+  const secondBonusClient = await newClient();
+  assert.deepEqual((await call(secondBonusClient, 'access', { inviteCode: funded.code })).wallet, { available: 200000, held: 0 });
+  assert.equal((await call(staff, 'admin.dashboard')).fundedInvitationCode, funded.code);
 
   const { code: replacement } = await generate('funded');
   assert.notEqual(replacement, funded.code);
@@ -106,6 +109,13 @@ async function main() {
     await call(trader, 'admin.access', {}, 403);
     const start = await call(trader, 'access');
     assert.deepEqual(start.wallet, { available: 0, held: 0 });
+    const clientNumber = start.profile.clientNumber;
+    assert.ok(Number.isSafeInteger(clientNumber) && clientNumber > 0);
+    assert.equal((await call(trader, 'access')).profile.clientNumber, clientNumber);
+    const reference = String(clientNumber);
+    assert.deepEqual(await call(staff, 'admin.client.resolve', { reference }), { uid, clientNumber });
+    assert.deepEqual(await call(staff, 'admin.client.resolve', { reference: uid }), { uid, clientNumber });
+    await call(trader, 'admin.client.resolve', { reference }, 403);
     assert.deepEqual((await call(trader, 'list', { list: 'ledger' })).rows, []);
     await checkAdminSession(staff, trader, uid);
     await checkInvitations(staff, trader, testClientUids);
@@ -114,8 +124,26 @@ async function main() {
     const adminCreated = await call(staff, 'admin.client.create', { name: 'Test Client', email: adminCreatedEmail, password });
     testClientUids.push(adminCreated.uid);
     const adminCreatedClient = await identityCall('signInWithPassword', adminCreatedEmail);
-    assert.deepEqual((await call(adminCreatedClient, 'access')).wallet, { available: 0, held: 0 });
+    const createdProfile = await db.collection('profiles').doc(adminCreated.uid).get();
+    const createdNumber = createdProfile.get('clientNumber');
+    assert.ok(Number.isSafeInteger(createdNumber) && createdNumber > clientNumber);
+    const createdAccess = await call(adminCreatedClient, 'access');
+    assert.equal(createdAccess.profile.clientNumber, createdNumber);
+    assert.deepEqual(createdAccess.wallet, { available: 0, held: 0 });
     assert.deepEqual((await call(adminCreatedClient, 'list', { list: 'ledger' })).rows, []);
+
+    const legacy = await identityCall('signUp', 'legacy-' + randomUUID() + '@example.test');
+    testClientUids.push(legacy.localId);
+    await db.collection('profiles').doc(legacy.localId).set({ uid: legacy.localId, name: 'Legacy Client', createdAt: Date.now(), assignedTo: staff.localId });
+    const [legacyList, legacyRoute] = await Promise.all([
+      call(staff, 'admin.clients', { search: legacy.localId }),
+      call(staff, 'admin.client.resolve', { reference: legacy.localId }),
+    ]);
+    assert.ok(legacyRoute.clientNumber > createdNumber);
+    assert.equal(legacyList.rows.find(row => row.id === legacy.localId)?.clientNumber, legacyRoute.clientNumber);
+    assert.deepEqual(await call(staff, 'admin.client.resolve', { reference: String(legacyRoute.clientNumber) }), legacyRoute);
+    const byNumber = await call(staff, 'admin.clients', { search: '#' + legacyRoute.clientNumber });
+    assert.equal(byNumber.rows[0]?.id, legacy.localId);
 
     const unauthorised = await fetch(firestoreUrl + 'wallets/' + uid, {
       headers: { Authorization: 'Bearer ' + trader.idToken },
@@ -197,6 +225,17 @@ async function main() {
     await call(staff, 'admin.funding.decide', decision);
     assert.equal((await call(trader, 'home')).wallet.available, settled.wallet.available + 2500);
     await call(staff, 'admin.funding.decide', { ...decision, requestId: randomUUID() }, 400);
+
+    const [matchingDeposits, matchingWithdrawals, matchingTrades, matchingAudit] = await Promise.all([
+      call(staff, 'admin.funding', { kind: 'deposit', status: 'approved', search: '123456789012' }),
+      call(staff, 'admin.funding', { kind: 'withdrawal', status: 'cancelled', search: email.toUpperCase() }),
+      call(staff, 'admin.trades', { search: 'BTC/USDT' }),
+      call(staff, 'admin.audit', { search: 'Verified test request' }),
+    ]);
+    assert.ok(matchingDeposits.rows.some(row => row.id === deposit.id));
+    assert.deepEqual(matchingWithdrawals.rows.map(row => row.id), [withdrawal.id]);
+    assert.ok(matchingTrades.rows.some(row => row.id === placed.id));
+    assert.ok(matchingAudit.rows.some(row => row.uid === uid && row.event === 'Deposit approved'));
     const unreadMarker = async viewer => (await call(viewer, 'admin.clients', { search: uid })).rows.find(row => row.id === uid)?.supportUnreadMarker;
     await db.collection('profiles').doc(uid).update({ supportNeedsReply: true });
     await db.collection('messages').add({ uid, sender: 'You', message: 'Legacy unread message', createdAt: Date.now() - 1000 });
@@ -220,6 +259,8 @@ async function main() {
     const otherStaffRef = db.collection('staff').doc(otherStaff.localId);
     await otherStaffRef.set({ active: true, roles: ['support'], allClients: false });
     await call(otherStaff, 'admin.invite.refresh', { kind: 'funded', requestId: randomUUID() }, 403);
+    await call(otherStaff, 'admin.client.resolve', { reference }, 403);
+    await call(otherStaff, 'admin.client.resolve', { reference: uid }, 403);
     assert.deepEqual((await call(otherStaff, 'admin.clients.activity', { uids: [uid] })).rows, []);
     await otherStaffRef.update({ allClients: true });
     assert.equal(await unreadMarker(otherStaff), sent.id);
@@ -244,6 +285,14 @@ async function main() {
     assert.equal(first.rows.length, 25);
     assert.equal(second.rows.length, 5);
     assert.equal(new Set([...first.rows, ...second.rows].map(row => row.id)).size, 30);
+    const search = { kind: 'deposit', status: 'pending', search: 'UID: ' + uid };
+    const firstMatch = await call(staff, 'admin.funding', search);
+    const secondMatch = await call(staff, 'admin.funding', { ...search, cursor: firstMatch.cursor });
+    assert.equal(firstMatch.rows.length, 25);
+    assert.equal(secondMatch.rows.length, 3);
+    assert.equal(new Set([...firstMatch.rows, ...secondMatch.rows].map(row => row.id)).size, 28);
+    assert.ok([...firstMatch.rows, ...secondMatch.rows].every(row => row.uid === uid));
+    await call(staff, 'admin.funding', { ...search, search: 'another query', cursor: firstMatch.cursor }, 400);
     const pushed = await call(staff, 'admin.notifications.push', { uid, title: 'Maintenance Alert', message: 'Scheduled check', requestId: randomUUID() });
     const notifsBefore = await call(trader, 'list', { list: 'notifications' });
     const targetNotif = notifsBefore.rows.find(row => row.id === pushed.id);

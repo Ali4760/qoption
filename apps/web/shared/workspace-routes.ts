@@ -27,11 +27,11 @@ export function adminPath(route: string) {
   return '/advin/' + (route === 'overview' ? 'dashboard' : route);
 }
 
-export function adminClientPath(uid: string, messages = false) {
-  return adminPath('clients') + '/' + encodeURIComponent(uid) + (messages ? '/messages' : '');
+export function adminClientPath(reference: string | number, messages = false) {
+  return adminPath('clients') + '/' + encodeURIComponent(String(reference)) + (messages ? '/messages' : '');
 }
 
-function decodeClientId(segment: string) {
+function decodeClientReference(segment: string) {
   try {
     const uid = decodeURIComponent(segment);
     return uid === '.' || uid === '..' || uid.includes('/') ? '' : uid;
@@ -42,11 +42,11 @@ function decodeClientId(segment: string) {
 
 export function adminRouteForPath(path: string) {
   const detail = /^\/advin\/clients\/([^/]+)(\/messages)?\/?$/.exec(path);
-  const uid = detail ? decodeClientId(detail[1]) : '';
-  if (uid) return { route: 'client', uid, messages: Boolean(detail?.[2]) };
+  const reference = detail ? decodeClientReference(detail[1]) : '';
+  if (reference) return { route: 'client', reference, messages: Boolean(detail?.[2]) };
 
   const section = /^\/advin\/([^/]+)\/?$/.exec(path)?.[1];
-  return { route: !section || section === 'dashboard' ? 'overview' : section, uid: '', messages: false };
+  return { route: !section || section === 'dashboard' ? 'overview' : section, reference: '', messages: false };
 }
 
 export function workspaceEntryPath(
@@ -57,7 +57,7 @@ export function workspaceEntryPath(
   const [section, client, sub] = hash.slice(1).split('/');
   if (adminRoutes && path === '/advin') {
     if (section === 'client' && client) {
-      const uid = decodeClientId(client);
+      const uid = decodeClientReference(client);
       if (uid) return adminClientPath(uid, sub === 'messages');
     }
     if (adminRoutes.some(([id]) => id === section)) return adminPath(section);

@@ -1,4 +1,5 @@
-import { demoHistory, demoPrice, isTradableAsset, type Asset, type Point, type TradableAsset } from '../../../functions/src/market';
+import { demoHistory, demoPrice, isGateAsset, type Asset, type DemoAsset, type Point } from '../../../functions/src/market';
+import { gateCandles } from '../../../functions/src/gate-market';
 
 export type ChartMode = 'line' | 'candles' | 'combined';
 type ChartPoint = Point & { open?: number; high?: number; low?: number; volume?: number };
@@ -217,7 +218,7 @@ export function mountChart(
     clearTimeout(timer); clearInterval(fallbackTimer); fallbackTimer = 0; socket?.close(); socket = undefined; pending?.abort(); pending = undefined;
   }
 
-  function startSimulated(asset: TradableAsset, interval: number, id: number, clockOffset = 0, labelText = 'Live market data') {
+  function startSimulated(asset: DemoAsset, interval: number, id: number, clockOffset = 0, labelText = 'Live market data') {
     status.textContent = labelText;
     const tick = () => {
       if (generation !== id) return;
@@ -240,8 +241,29 @@ export function mountChart(
     const id = generation, interval = frames[frame] || frames['1m'];
     stop();
     points = []; offset = 0; retries = 0; currentFrame = frame; paint();
-    if (!isTradableAsset(asset)) {
-      status.textContent = 'Market data unavailable';
+    if (isGateAsset(asset)) {
+      const refresh = async () => {
+        pending = new AbortController();
+        try {
+          const rows = await gateCandles(asset, frame, points.length ? 3 : 180, pending.signal);
+          const history = rows.map(row => candlePoint(Number(row[0]) * 1000, row[5], row[3], row[4], row[2], row[6]))
+            .filter((point): point is ChartPoint => point !== null)
+            .sort((a, b) => a.time - b.time);
+          if (generation !== id) return;
+          const first = history[0], latest = history.at(-1);
+          if (!first || !latest) throw new Error('Empty Gate market history.');
+          points = [...points.filter(point => point.time < first.time), ...history].slice(-250);
+          status.textContent = 'Live market data · Gate';
+          onPrice(latest.price);
+          paint();
+        } catch {
+          if (generation === id) status.textContent = 'Gate market data unavailable';
+        } finally {
+          if (generation === id) timer = window.setTimeout(() => void refresh(), 5000);
+        }
+      };
+      status.textContent = 'Connecting to Gate spot';
+      void refresh();
       return;
     }
     if (!live) {

@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldPath, FieldValue, getFirestore, type DocumentData, type Query, type Transaction } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, getFirestore, type DocumentData, type DocumentSnapshot, type Query, type Transaction } from 'firebase-admin/firestore';
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { demoPrice, durations, findAsset, isTradableAsset, profitForDuration, profitPercent } from './market';
+import { demoPrice, durations, findAsset, isGateAsset, profitForDuration, profitPercent } from './market';
+import { gateFeedVersion, gateTradePrice } from './gate-market';
 import { walletFreeze } from './wallet-freeze';
 import { withdrawalReputationWarning } from './withdrawal-reputation';
 
@@ -68,6 +69,30 @@ async function bumpSync(fields: Record<string, unknown>, userUids: string[] = []
 
 const profile = (uid: string) => db.collection('profiles').doc(uid);
 const wallet = (uid: string) => db.collection('wallets').doc(uid);
+
+function isClientNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function parseClientNumber(reference: string) {
+  const number = Number(reference);
+  return /^[1-9]\d*$/.test(reference) && isClientNumber(number) ? number : undefined;
+}
+
+async function reserveClientNumbers(tx: Transaction, count: number) {
+  const ref = db.collection('meta').doc('clientNumbers');
+  const counter = await tx.get(ref);
+  let last: unknown = counter.get('last');
+  if (!counter.exists) {
+    const highest = await tx.get(db.collection('profiles').orderBy('clientNumber', 'desc').limit(1));
+    last = highest.docs[0]?.get('clientNumber') ?? 0;
+  }
+  if (last !== 0 && !isClientNumber(last)) fail('internal', 'The client number counter is invalid.');
+  const next = last + count;
+  if (!Number.isSafeInteger(next)) fail('resource-exhausted', 'Client numbers are unavailable.');
+  tx.set(ref, { last: next });
+  return last + 1;
+}
 
 async function recordClientActivity(uid: string, ageMs: unknown) {
   if (typeof ageMs !== 'number' || !Number.isSafeInteger(ageMs) || ageMs < 0 || ageMs >= 600_000) {
@@ -137,8 +162,10 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
     }
     if (!user.exists) {
       const name = trimmedName || email.split('@')[0]?.slice(0, 40) || 'Trader';
+      const clientNumber = await reserveClientNumbers(tx, 1);
       tx.create(profile(uid), {
         uid,
+        clientNumber,
         email,
         name,
         nameSearch: name.toLowerCase(),
@@ -150,6 +177,7 @@ async function upsertProfile(uid: string, email: string, nameParam?: string, inv
       });
     } else {
       const updates: Record<string, unknown> = {};
+      if (!isClientNumber(user.get('clientNumber'))) updates.clientNumber = await reserveClientNumbers(tx, 1);
       if (trimmedName) {
         updates.name = trimmedName;
         updates.nameSearch = trimmedName.toLowerCase();
@@ -209,19 +237,25 @@ async function checkStaff(tx: Transaction, user: Actor, role: string) {
   }
 }
 
-async function mutate(user: Actor, data: Data, operation: string, parameters: unknown, apply: Mutation) {
+async function mutate(user: Actor, data: Data, operation: string, parameters: unknown, apply: Mutation, prepare?: () => Promise<void>) {
   const key = identifier(data.requestId);
   const fingerprint = digest(parameters);
   const ref = db.collection('operationReceipts').doc(digest([user.uid, operation, key]));
+  const previousResult = (previous: DocumentSnapshot) => {
+    if (previous.get('fingerprint') !== fingerprint) fail('already-exists', 'This request ID belongs to another submission.');
+    return previous.get('result') as Data;
+  };
+  if (prepare) {
+    const previous = await ref.get();
+    if (previous.exists) return previousResult(previous);
+    await prepare();
+  }
   const now = Date.now();
   const minute = Math.floor(now / 60000);
   const rate = db.collection('writeLimits').doc(user.uid);
   return db.runTransaction(async tx => {
     const [previous, active] = await Promise.all([tx.get(ref), tx.get(rate)]);
-    if (previous.exists) {
-      if (previous.get('fingerprint') !== fingerprint) fail('already-exists', 'This request ID belongs to another submission.');
-      return previous.get('result') as Data;
-    }
+    if (previous.exists) return previousResult(previous);
     const count = active.get('minute') === minute ? Number(active.get('count')) : 0;
     if (count >= 24) fail('resource-exhausted', 'Too many changes. Try again in a minute.');
     const result = await apply(tx);
@@ -254,13 +288,18 @@ async function placeTrade(user: Actor, data: Data) {
   if (!asset || !durations.some(value => value === duration) || (direction !== 'up' && direction !== 'down')) {
     fail('invalid-argument', 'Choose a supported market, direction, and duration.');
   }
-  if (!isTradableAsset(asset)) fail('failed-precondition', 'Trading is unavailable for this market.');
   const stake = cents(data.amount);
-  const now = Date.now(), dueAt = now + 1000 * duration;
+  let now = Date.now();
   const pct = profitForDuration(duration);
+  const usesGate = isGateAsset(asset);
   const clientPrice = typeof data.price === 'number' && Number.isFinite(data.price) && data.price > 0 ? data.price : 0;
-  const feedVersion = clientPrice > 0 ? 2 : 1;
-  const entry = clientPrice > 0 ? Math.round(clientPrice * 1e6) / 1e6 : demoPrice(asset, now);
+  const feedVersion = usesGate ? gateFeedVersion : clientPrice > 0 ? 2 : 1;
+  let gateEntry: number | null = null;
+  const prepare = usesGate ? async () => {
+    gateEntry = await gateTradePrice(asset).catch(() => null);
+    if (gateEntry === null) fail('failed-precondition', 'The Openverse Network price is temporarily unavailable.');
+    now = Date.now();
+  } : undefined;
   const trade = db.collection('trades').doc();
   const result = await mutate(user, data, 'trade.place', [asset.symbol, duration, direction, stake], async tx => {
     const [person, balance] = await Promise.all([tx.get(profile(user.uid)), tx.get(wallet(user.uid))]);
@@ -268,11 +307,13 @@ async function placeTrade(user: Actor, data: Data) {
     if (!person.get('tradeEnabled')) fail('failed-precondition', 'Trading is paused for this account.');
     const freeze = walletFreeze(Number(balance.get('available') ?? 0), person.data() ?? {});
     if (freeze.kind === 'amount' && stake > freeze.available) fail('failed-precondition', 'The trade amount exceeds your unfrozen balance.');
+    const dueAt = now + 1000 * duration;
+    const entry = usesGate ? gateEntry! : clientPrice > 0 ? Math.round(clientPrice * 1e6) / 1e6 : demoPrice(asset, now);
     changeFunds(tx, user.uid, balance.data(), -stake, stake);
     tx.create(trade, { uid: user.uid, symbol: asset.symbol, direction, duration, stake, entry, dueAt, createdAt: now, status: 'open', feedVersion, profitPercent: pct });
     ledger(tx, user.uid, 'trade_hold_' + trade.id, 'Trade hold', -stake, stake, now, asset.code + ' trade');
     return { id: trade.id, entry, dueAt, duration, profitPercent: pct, stake, symbol: asset.symbol, direction, createdAt: now };
-  });
+  }, prepare);
   const ts = Date.now();
   await bumpSync({ tradesAt: ts, clientsAt: ts }, [user.uid]);
   return result;
@@ -283,7 +324,10 @@ async function settle(id: string, now: number): Promise<string | null> {
   const preSnap = (await ref.get()).data();
   if (!preSnap || preSnap.status !== 'open' || preSnap.dueAt > now) return null;
   let liveExit: number | null = null;
-  if (preSnap.feedVersion === 2 && typeof preSnap.symbol === 'string') {
+  const market = findAsset(preSnap.symbol);
+  if (preSnap.feedVersion === gateFeedVersion && market && isGateAsset(market)) {
+    liveExit = await gateTradePrice(market, { from: preSnap.createdAt, to: preSnap.dueAt }).catch(() => null);
+  } else if (preSnap.feedVersion === 2 && typeof preSnap.symbol === 'string') {
     liveExit = await liveAssetPrice(preSnap.symbol);
   }
   let settledUid: string | null = null;
@@ -292,17 +336,20 @@ async function settle(id: string, now: number): Promise<string | null> {
     if (!trade || trade.status !== 'open' || trade.dueAt > now) return;
     const [balanceSnap, personSnap] = await Promise.all([tx.get(wallet(trade.uid)), tx.get(profile(trade.uid))]);
     const balance = balanceSnap.data();
-    const tradeMode = String(personSnap.get('tradeMode') || 'auto').toLowerCase();
+    const usesGate = trade.feedVersion === gateFeedVersion;
+    const tradeMode = usesGate ? 'auto' : String(personSnap.get('tradeMode') || 'auto').toLowerCase();
     const asset = findAsset(trade.symbol);
     let exit: number | null = null;
-    if (trade.feedVersion === 2) {
+    if (usesGate) {
+      exit = liveExit;
+    } else if (trade.feedVersion === 2) {
       if (liveExit !== null) exit = liveExit;
-      else if (asset && isTradableAsset(asset)) {
+      else if (asset && !isGateAsset(asset)) {
         const simDelta = (demoPrice(asset, trade.dueAt) - demoPrice(asset, trade.createdAt)) / Math.max(1e-9, demoPrice(asset, trade.createdAt));
         exit = Math.round(Number(trade.entry) * (1 + simDelta) * 1e6) / 1e6;
       }
     } else {
-      exit = asset && isTradableAsset(asset) && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
+      exit = asset && !isGateAsset(asset) && trade.feedVersion === 1 ? demoPrice(asset, trade.dueAt) : null;
     }
     const outcome = tradeMode === 'win' ? 'win'
       : tradeMode === 'loss' ? 'loss'
@@ -321,7 +368,7 @@ async function settle(id: string, now: number): Promise<string | null> {
     changeFunds(tx, trade.uid, balance, payout, -trade.stake);
     tx.update(ref, { status: 'settled', outcome, exit, payout, pnl, settledAt: now });
     ledger(tx, trade.uid, 'trade_result_' + id, 'Trade ' + outcome, payout, -trade.stake, now, (asset?.code || trade.symbol) + ' trade');
-    const pairLabel = (asset?.code || String(trade.symbol || '').replace(/USDT$/, '')) + '/USD';
+    const pairLabel = (asset?.code || String(trade.symbol || '').replace(/USDT$/, '')) + (usesGate ? '/USDT' : '/USD');
     const amtText = '₹' + (Math.abs(outcome === 'win' ? pnl : trade.stake) / 100).toFixed(2);
     const notifMsg = outcome === 'win'
       ? `Trade successful on ${pairLabel}. Profit: ${amtText}.`
@@ -545,7 +592,15 @@ async function decideFunding(user: Actor, data: Data, asStaff: boolean) {
   return result;
 }
 
-async function page(query: Query, data: Data, scope: unknown, field = 'createdAt', ascending = false, defaultSize = 25) {
+async function page(
+  query: Query,
+  data: Data,
+  scope: unknown,
+  field = 'createdAt',
+  ascending = false,
+  defaultSize = 25,
+  selectRows?: (rows: Data[]) => Promise<Data[]>,
+) {
   const direction = ascending ? 'asc' : 'desc';
   const requestedLimit = Number(data.limit);
   const size = Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(100, Math.round(requestedLimit)) : defaultSize;
@@ -558,12 +613,46 @@ async function page(query: Query, data: Data, scope: unknown, field = 'createdAt
       sorted = sorted.startAfter(cursor.value, identifier(cursor.id));
     } catch { fail('invalid-argument', 'Reload the list from the first page.'); }
   }
-  const snapshots = (await sorted.limit(size + 1).get()).docs;
-  const docs = snapshots.slice(0, size);
-  const last = docs.at(-1);
-  const cursor = snapshots.length > size && last
-    ? Buffer.from(JSON.stringify({ key, value: last.get(field), id: last.id })).toString('base64url') : null;
-  return { rows: docs.map(doc => ({ ...doc.data(), id: doc.id })), cursor };
+  const rows: Data[] = [];
+  const batchSize = selectRows ? Math.max(50, size + 1) : size + 1;
+  do {
+    const docs = (await sorted.limit(batchSize).get()).docs;
+    const batch = docs.map(doc => ({ ...doc.data(), id: doc.id }));
+    rows.push(...(selectRows ? await selectRows(batch) : batch));
+    const last = docs.at(-1);
+    if (docs.length < batchSize || !last) break;
+    sorted = sorted.startAfter(last);
+  } while (rows.length <= size);
+  const result = rows.slice(0, size);
+  const last = result.at(-1);
+  const cursor = rows.length > size && last
+    ? Buffer.from(JSON.stringify({ key, value: last[field], id: last.id })).toString('base64url') : null;
+  return { rows: result, cursor };
+}
+
+function adminSearchTerm(value: unknown) {
+  return text(value ?? '', 80, 0).replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
+}
+
+async function adminListPage(
+  query: Query,
+  data: Data,
+  scope: unknown[],
+  enrich: (rows: Data[]) => Promise<Data[]>,
+  additionalFields: string[],
+) {
+  const search = adminSearchTerm(data.search);
+  if (!search) {
+    const result = await page(query, data, scope);
+    return { ...result, rows: await enrich(result.rows) };
+  }
+  const fields = ['id', 'uid', 'clientName', 'clientEmail', ...additionalFields];
+  return page(query, data, [...scope, search], 'createdAt', false, 25, async rows =>
+    (await enrich(rows)).filter(row => fields.some(field => {
+      const value = String(row[field] ?? '').toLowerCase();
+      return value.includes(field === 'symbol' ? search.replace('/', '') : search);
+    })),
+  );
 }
 const own = (collection: string, uid: string) => db.collection(collection).where('uid', '==', uid);
 async function home(user: Actor) {
@@ -747,6 +836,45 @@ async function clientView(user: Actor, data: Data) {
   const activity = await page(own(user.staff.some(role => role !== 'support') ? 'ledger' : 'messages', uid), data, ['client', user.uid, uid]);
   return { profile: state, wallet: funds ?? null, activity };
 }
+
+async function assignClientNumbers(user: Actor, uids: string[]) {
+  if (!uids.length) return new Map<string, number>();
+  return db.runTransaction(async tx => {
+    const clients = await tx.getAll(...uids.map(profile));
+    const assigned = new Map<string, number>();
+    const missing: DocumentSnapshot[] = [];
+    for (const client of clients) {
+      checkScope(user, client.data());
+      const number = client.get('clientNumber');
+      if (isClientNumber(number)) assigned.set(client.id, number);
+      else missing.push(client);
+    }
+    if (missing.length) {
+      let number = await reserveClientNumbers(tx, missing.length);
+      for (const client of missing) {
+        tx.update(client.ref, { clientNumber: number });
+        assigned.set(client.id, number++);
+      }
+    }
+    return assigned;
+  });
+}
+
+async function resolveClientRoute(user: Actor, data: Data) {
+  const reference = identifier(data.reference);
+  const number = parseClientNumber(reference);
+  const matches = number === undefined ? null : await db.collection('profiles').where('clientNumber', '==', number).limit(2).get();
+  if (matches && matches.size > 1) fail('failed-precondition', 'The client number is duplicated.');
+  const client = matches?.docs[0] ?? await profile(reference).get();
+  checkScope(user, client.data());
+  if ((await db.collection('staff').doc(client.id).get()).get('active') === true) {
+    fail('permission-denied', 'This account does not have a client page.');
+  }
+  const current = client.get('clientNumber');
+  const clientNumber = isClientNumber(current) ? current : (await assignClientNumbers(user, [client.id])).get(client.id);
+  if (!isClientNumber(clientNumber)) fail('internal', 'The client number could not be assigned.');
+  return { uid: client.id, clientNumber };
+}
 async function adminUpdate(user: Actor, data: Data, adjusting: boolean) {
   const role = adjusting ? 'finance' : 'admin';
   requireRole(user, role);
@@ -887,8 +1015,10 @@ async function adminClientCreate(user: Actor, data: Data) {
   const now = Date.now();
   await db.runTransaction(async tx => {
     await checkStaff(tx, user, 'admin');
+    const clientNumber = await reserveClientNumbers(tx, 1);
     tx.create(profile(created.uid), {
       uid: created.uid,
+      clientNumber,
       email,
       name,
       nameSearch: name.toLowerCase(),
@@ -966,7 +1096,7 @@ async function adminNotificationDelete(user: Actor, data: Data) {
   return result;
 }
 
-async function enrichWithProfiles(rows: Data[], db: ReturnType<typeof getFirestore>) {
+async function enrichWithProfiles(rows: Data[]) {
   const uids = [...new Set(rows.map(r => String(r.uid || '')).filter(Boolean))];
   if (!uids.length) return rows;
   const chunks: string[][] = [];
@@ -1112,8 +1242,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     case 'admin.invite.refresh': return adminInviteRefresh(user, data);
     case 'admin.clients.activity': return adminClientActivity(user, data.uids);
     case 'admin.clients': {
-      const rawSearch = text(data.search ?? '', 80, 0).trim();
-      const search = rawSearch.replace(/^uid:\s*/i, '').replace(/^#/, '').trim().toLowerCase();
+      const search = adminSearchTerm(data.search);
       const query = await staffQuery(user, 'profiles');
 
       // Load all active staff UIDs so we can exclude them from the client list.
@@ -1122,15 +1251,21 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
 
       let result: { rows: Data[]; cursor: string | null };
       if (search) {
-        const snap = await query.orderBy('createdAt', 'desc').limit(500).get();
-        const matched = snap.docs
+        const number = parseClientNumber(search);
+        const [snap, exact] = await Promise.all([
+          query.orderBy('createdAt', 'desc').limit(500).get(),
+          number === undefined ? null : query.where('clientNumber', '==', number).limit(1).get(),
+        ]);
+        const first = exact?.docs[0];
+        const candidates = first ? [first, ...snap.docs.filter(doc => doc.id !== first.id)] : snap.docs;
+        const matched = candidates
           .map(doc => ({ ...doc.data(), id: doc.id }))
           .filter((row: Data) => {
             if (staffUids.has(String(row.id || ''))) return false; // exclude staff
             const uid = String(row.id || '').toLowerCase();
             const name = String(row.name || '').toLowerCase();
             const email = String(row.email || '').toLowerCase();
-            return uid.includes(search) || name.includes(search) || email.includes(search);
+            return (number !== undefined && row.clientNumber === number) || uid.includes(search) || name.includes(search) || email.includes(search);
           })
           .slice(0, 25);
         result = { rows: matched, cursor: null };
@@ -1145,9 +1280,10 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       const unreadCandidates = chatEnabled
         ? result.rows.filter(row => supportMessageMarker(row)).map(row => supportReadRef(user.uid, String(row.id)))
         : [];
-      const [walletDocs, readDocs] = await Promise.all([
+      const [walletDocs, readDocs, numbers] = await Promise.all([
         Promise.all(uids.map(uid => wallet(uid).get())),
         unreadCandidates.length ? db.getAll(...unreadCandidates) : [],
+        assignClientNumbers(user, result.rows.filter(row => !isClientNumber(row.clientNumber)).map(row => String(row.id))),
       ]);
       const walletMap = new Map(walletDocs.map(doc => [doc.id, doc.data()]));
       const readMarkers = new Map(readDocs.map(doc => [doc.id, doc.get('marker')]));
@@ -1156,6 +1292,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
         const marker = chatEnabled ? supportMessageMarker(row) : null;
         return {
           ...row,
+          clientNumber: numbers.get(uid) ?? row.clientNumber,
           balance: walletMap.get(uid)?.available ?? 0,
           supportUnreadMarker: marker && marker !== readMarkers.get(uid) ? marker : null,
         };
@@ -1170,22 +1307,17 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
       if ((kind !== 'deposit' && kind !== 'withdrawal') || !['pending', 'approved', 'rejected', 'cancelled', 'all'].includes(String(status))) fail('invalid-argument', 'Invalid filter.');
       let query = (await staffQuery(user, 'funding')).where('kind', '==', kind);
       if (status !== 'all') query = query.where('status', '==', status);
-      const result = await page(query, data, [op, user.uid, kind, status]);
-      result.rows = await enrichWithProfiles(result.rows, db) as typeof result.rows;
-      return result;
+      return adminListPage(query, data, [op, user.uid, kind, status], enrichWithProfiles, ['referenceNumber', 'method', 'status']);
     }
     case 'admin.trades': {
       requireRole(user, 'admin');
-      const result = await page(await staffQuery(user, 'trades'), data, [op, user.uid]);
-      result.rows = await enrichWithProfiles(result.rows, db) as typeof result.rows;
-      return result;
+      return adminListPage(await staffQuery(user, 'trades'), data, [op, user.uid], enrichWithProfiles, ['symbol', 'direction', 'status', 'outcome']);
     }
     case 'admin.audit': {
       requireRole(user, 'admin');
-      const result = await page(await staffQuery(user, 'audit'), data, [op, user.uid]);
-      result.rows = await enrichAuditRows(result.rows) as typeof result.rows;
-      return result;
+      return adminListPage(await staffQuery(user, 'audit'), data, [op, user.uid], enrichAuditRows, ['actor', 'actorName', 'event', 'reason']);
     }
+    case 'admin.client.resolve': return resolveClientRoute(user, data);
     case 'admin.client': return clientView(user, data);
     case 'admin.messages': return supportThread(user, data);
     case 'admin.messages.read': return readSupportMessage(user, data);

@@ -1,15 +1,16 @@
 import logoUrl from '../assets/qoption-logo.png';
 import type { ChartMode } from './canvas-chart';
-import { assets, demoPrice, findAsset, isTradableAsset, type Asset } from '../../../functions/src/market';
+import { assets, demoPrice, findAsset, isGateAsset, type Asset } from '../../../functions/src/market';
 import { walletFreeze } from '../../../functions/src/wallet-freeze';
 import { minimumWithdrawalReputation, withdrawalReputationWarning } from '../../../functions/src/withdrawal-reputation';
 import { dateTime, errorMessage, esc, type Home, type Page, type Row } from './view';
-import { coinIcon } from './coin-icons';
+import { coinIcon, tradeCoinIcon } from './coin-icons';
 
 const bi = (paths: string, size = 18) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
 
 export const clientIcons = {
+  tradeArrow: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5"/>'),
   snowflake: bi('<path d="M8 1v14M2 4.5l12 7M2 11.5l12-7M6 2l2 2 2-2m-4 12 2-2 2 2M2 7l3-1-.5-3M14 9l-3 1 .5 3M2 9l3 1-.5 3M14 7l-3-1 .5-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>', 16),
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
@@ -88,7 +89,20 @@ export function clientWithdrawalRestriction(home: Home) {
   return '';
 }
 
-export const formatPair = (sym: string) => sym.replace(/USDT$/, '/USD');
+export const formatPair = (sym: string) => {
+  const asset = findAsset(sym);
+  return sym.replace(/USDT$/, asset && isGateAsset(asset) ? '/USDT' : '/USD');
+};
+
+export function renderTradeAssetSelector(code: Asset['code']) {
+  const isBitcoin = code === 'BTC';
+  return tradeCoinIcon(code, isBitcoin ? 14 : 20) +
+    `<span id="headerAsset">${isBitcoin ? 'BT...' : esc(code)}</span>` + clientIcons.chevronDown;
+}
+
+export function renderChartAssetMark(code: Asset['code']) {
+  return code === 'BTC' ? `<span class="chart-symbol-mark">${clientIcons.tradeArrow}</span>` : coinIcon(code, 34);
+}
 
 export function renderTradePair(symbol: string, size = 18) {
   const asset = findAsset(symbol);
@@ -280,13 +294,13 @@ const clientChartTypes = {
   line: { label: 'Line chart', icon: clientIcons.trade },
 };
 
-export function clientChartPresentation(mode: ClientState['chartMode']) {
+export function clientChartPresentation(mode: ClientState['chartMode'], asset: Asset) {
   const nextMode = mode === 'candles' ? 'line' : 'candles';
   const chartType = clientChartTypes[mode];
   const nextType = clientChartTypes[nextMode];
   return {
     nextMode,
-    subtitle: `Live market · ${chartType.label}`,
+    subtitle: `${isGateAsset(asset) ? asset.name + ' · Gate spot' : 'Live market'} · ${chartType.label}`,
     canvasLabel: `Live market ${chartType.label.toLowerCase()}`,
     toggleLabel: `Switch to ${nextType.label.toLowerCase()}`,
     toggleIcon: nextType.icon,
@@ -313,9 +327,8 @@ export function createLeaderboardData() {
 }
 
 export function buildClientShellHtml(home: Home, state: ClientState) {
-  const chartPresentation = clientChartPresentation(state.chartMode);
-  const tradable = isTradableAsset(state.selected);
-  const tradeDisabled = !home.profile.tradeEnabled || !tradable;
+  const chartPresentation = clientChartPresentation(state.chartMode, state.selected);
+  const tradeDisabled = !home.profile.tradeEnabled;
   return `
   <div id="app-interface" class="${state.activeTab === 'market' ? 'market-active' : 'content-expanded'}">
     <div class="top-bar">
@@ -328,10 +341,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       </div>
 
       <div class="top-right-controls">
-        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets" data-selected-coin aria-label="Choose asset">
-          ${coinIcon(state.selected.code)}
-          <span id="headerAsset">${esc(state.selected.code)}</span>
-          ${clientIcons.chevronDown}
+        <button type="button" class="asset-btn asset-btn-desk" data-action="client-toggle-assets" aria-label="Choose asset">
+          ${renderTradeAssetSelector(state.selected.code)}
         </button>
 
         <div class="balance-group">
@@ -411,8 +422,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
       <div id="tv_chart_container">
         <div class="chart-shell">
           <div class="chart-toolbar">
-            <div class="chart-market-info" data-selected-coin>
-              ${coinIcon(state.selected.code, 34)}
+            <div class="chart-market-info">
+              <span id="chartAssetMark">${renderChartAssetMark(state.selected.code)}</span>
               <div>
                 <div class="chart-market-name" id="chartMarketName">${esc(formatPair(state.selected.symbol))}</div>
                 <div class="chart-market-subtitle">${chartPresentation.subtitle}</div>
@@ -434,7 +445,7 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
             <div class="chart-live-marker" id="chartLiveMarker" aria-hidden="true"></div>
             <span id="market-price" hidden></span>
           </div>
-          <div class="chart-status"><span class="chart-live-dot"${tradable ? '' : ' hidden'}></span><span id="feed-status">${tradable ? 'Live market data' : 'Market data unavailable'}</span></div>
+          <div class="chart-status"><span class="chart-live-dot"></span><span id="feed-status">${isGateAsset(state.selected) ? 'Connecting to Gate spot' : 'Live market data'}</span></div>
         </div>
       </div>
 
@@ -457,8 +468,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <label class="control-label">Asset</label>
         <div class="iq-dropdown" id="assetDrop">
           <div class="asset-select-head" data-action="client-toggle-asset-drop">
-            <div class="coin-label" data-selected-coin>
-              ${coinIcon(state.selected.code, 18)}
+            <div class="coin-label">
+              <span id="tradeTicketAssetIcon">${tradeCoinIcon(state.selected.code, 18)}</span>
               <span id="selectedAssetName">${esc(formatPair(state.selected.symbol))}</span>
             </div>
             ${clientIcons.chevronDown}
@@ -485,7 +496,7 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
           </div>
           <div class="iq-dropdown-list" id="timeList">
             ${durationChoices.map(d => `
-              <div class="iq-dropdown-item${state.selDur === d.sec ? ' selected' : ''}" data-action="client-set-duration" data-sec="${d.sec}" data-profit="${d.profit}">
+              <div class="iq-dropdown-item${state.selDur === d.sec ? ' selected' : ''}" data-action="client-set-duration" data-sec="${d.sec}">
                 <span>${esc(d.label)} (+${d.profit}%)</span>
               </div>
             `).join('')}
@@ -1171,15 +1182,16 @@ export function updateNotifBanners(banners: HTMLElement, bell: HTMLElement | nul
 export function renderAssetDropdownAndGrid(state: ClientState) {
   const now = Date.now();
   const markets = assets.map(asset => {
-    if (!isTradableAsset(asset)) {
-      return { asset, subtitle: asset.name, price: '—', change: 'View only', color: 'var(--iq-muted)' };
-    }
-    const quote = state.quotes.get(asset.symbol);
-    const price = quote?.price ?? demoPrice(asset, now);
-    const change = quote?.change ?? ((asset.base % 7) - 3) * 0.8;
+    const usesGate = isGateAsset(asset);
+    const quote = state.quotes.get(asset.symbol) ?? (usesGate ? null : {
+      price: demoPrice(asset, now),
+      change: ((asset.base % 7) - 3) * 0.8,
+    });
+    if (!quote) return { asset, subtitle: asset.name, price: '—', change: 'Gate spot', color: 'var(--iq-muted)' };
+    const { price, change } = quote;
     return {
       asset,
-      subtitle: asset.symbol,
+      subtitle: usesGate ? asset.name : asset.symbol,
       price: price < 1 ? price.toFixed(4) : price.toFixed(2),
       change: (change >= 0 ? '+' : '') + change.toFixed(2) + '%',
       color: change >= 0 ? 'var(--iq-green)' : 'var(--iq-red)',
@@ -1189,7 +1201,7 @@ export function renderAssetDropdownAndGrid(state: ClientState) {
   const dropItems = markets.map(({ asset: a, subtitle, price, change, color }) => `
       <div class="asset-select-item${a.symbol === state.selected.symbol ? ' active' : ''}" data-action="asset" data-id="${esc(a.symbol)}">
         <div class="coin-label">
-          ${coinIcon(a.code)}
+          ${tradeCoinIcon(a.code)}
           <div>
             <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
             <div style="font-size:10px;color:var(--iq-muted);font-weight:700;">${esc(subtitle)}</div>
@@ -1204,7 +1216,7 @@ export function renderAssetDropdownAndGrid(state: ClientState) {
   const gridItems = markets.map(({ asset: a, price, change, color }) => `
       <div class="coin-flash-item" data-action="asset" data-id="${esc(a.symbol)}">
         <div class="coin-label">
-          ${coinIcon(a.code)}
+          ${tradeCoinIcon(a.code)}
           <div>
             <div style="font-weight:800;color:#fff;">${esc(formatPair(a.symbol))}</div>
             <div style="font-family:monospace;font-weight:800;font-size:12px;color:${color};">${price}</div>
