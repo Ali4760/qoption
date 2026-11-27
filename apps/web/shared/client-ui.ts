@@ -10,7 +10,6 @@ const bi = (paths: string, size = 18) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">${paths}</svg>`;
 
 export const clientIcons = {
-  tradeArrow: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm10 3.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-1 0V4.9l-3.613 4.417a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61L13.445 4H10.5a.5.5 0 0 1-.5-.5"/>'),
   snowflake: bi('<path d="M8 1v14M2 4.5l12 7M2 11.5l12-7M6 2l2 2 2-2m-4 12 2-2 2 2M2 7l3-1-.5-3M14 9l-3 1 .5 3M2 9l3 1-.5 3M14 7l-3-1 .5-3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>', 16),
   menu: bi('<path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>', 20),
   trade: bi('<path fill-rule="evenodd" d="M0 0h1v15h15v1H0zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07"/>'),
@@ -98,10 +97,6 @@ export function renderTradeAssetSelector(code: Asset['code']) {
   const isBitcoin = code === 'BTC';
   return tradeCoinIcon(code, isBitcoin ? 14 : 20) +
     `<span id="headerAsset">${isBitcoin ? 'BT...' : esc(code)}</span>` + clientIcons.chevronDown;
-}
-
-export function renderChartAssetMark(code: Asset['code']) {
-  return code === 'BTC' ? `<span class="chart-symbol-mark">${clientIcons.tradeArrow}</span>` : coinIcon(code, 34);
 }
 
 export function renderTradePair(symbol: string, size = 18) {
@@ -423,11 +418,8 @@ export function buildClientShellHtml(home: Home, state: ClientState) {
         <div class="chart-shell">
           <div class="chart-toolbar">
             <div class="chart-market-info">
-              <span id="chartAssetMark">${renderChartAssetMark(state.selected.code)}</span>
-              <div>
-                <div class="chart-market-name" id="chartMarketName">${esc(formatPair(state.selected.symbol))}</div>
-                <div class="chart-market-subtitle">${chartPresentation.subtitle}</div>
-              </div>
+              <div class="chart-market-name" id="chartMarketName">${esc(formatPair(state.selected.symbol))}</div>
+              <div class="chart-market-subtitle">${chartPresentation.subtitle}</div>
             </div>
             <div class="chart-controls">
               <div class="chart-timeframes" role="group" aria-label="Chart timeframe">

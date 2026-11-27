@@ -23,7 +23,7 @@ import {
   clientChartPresentation, clientIcons, clientWithdrawalRestriction, createLeaderboardData, curSym, downloadCsv, durationChoices, filterTrades, filterTransactions,
   fmtMoney, fmtSignedMoney, formatDurationLabel, formatPair, isNotifUnread, renderAssetDropdownAndGrid, renderBankFieldsHtml,
   renderAssetsBalance, renderDepositPaymentHtml, renderNotificationsOverlayList, renderOrderBookHtml, renderRealAccountBalance, renderReputationValue, renderTradePair, renderTxnDetailHtml,
-  renderChartAssetMark, renderTradeAssetSelector,
+  renderTradeAssetSelector,
   updateNotifBanners, validateBankDetails, type ClientState,
 } from './client-ui';
 
@@ -1563,8 +1563,6 @@ function updateMarket() {
   if (ticketIcon) ticketIcon.innerHTML = tradeCoinIcon(selected.code, 18);
   const sAsset = root.querySelector('#selectedAssetName');
   if (sAsset) sAsset.textContent = formatPair(selected.symbol);
-  const chartMark = root.querySelector('#chartAssetMark');
-  if (chartMark) chartMark.innerHTML = renderChartAssetMark(selected.code);
   const cMarket = root.querySelector('#chartMarketName');
   if (cMarket) cMarket.textContent = formatPair(selected.symbol);
   const subtitle = root.querySelector('.chart-market-subtitle');

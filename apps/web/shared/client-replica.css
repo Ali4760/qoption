@@ -385,23 +385,6 @@
   border-bottom: 1px solid rgba(148, 178, 208, 0.12);
 }
 
-#app-interface .chart-market-info {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-#app-interface .chart-symbol-mark {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid rgba(31, 214, 164, 0.34);
-  background: rgba(31, 214, 164, 0.12);
-  color: #5eefc4;
-}
-
 #app-interface .chart-market-name {
   font-family: "Workspace Syne", "Workspace Outfit", sans-serif;
   color: #f4f8fc;
