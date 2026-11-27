@@ -2764,13 +2764,23 @@ document.addEventListener('visibilitychange', () => {
     if (!syncInitialized || (clientState.activeTrade && clientState.activeTrade.dueAt <= Date.now() + clockOffset)) void silentRefreshUserView();
   }
 });
-window.addEventListener('pagehide', () => {
-  if (admin && person) expireAdminSession();
-  else stop();
+window.addEventListener('pagehide', event => {
+  if (!admin || !event.persisted) {
+    stop();
+    return;
+  }
+  resetWorkspaceSession(null);
+  showStartup(root);
+  root.replaceChildren();
 });
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
+  if (admin) {
+    // Recheck the tab's Firebase session and staff access before restoring the workspace.
+    location.reload();
+    return;
+  }
   if (access) void render();
-  else if (!admin) void attachLoginChart();
+  else void attachLoginChart();
 });
 void start();

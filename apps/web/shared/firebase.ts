@@ -1,6 +1,6 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, initializeAuth, inMemoryPersistence, setPersistence, type Auth } from 'firebase/auth';
+import { browserLocalPersistence, browserSessionPersistence, connectAuthEmulator, getAuth, initializeAuth, setPersistence, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Unsubscribe } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 
@@ -43,7 +43,7 @@ export async function connect(audience: 'admin' | 'user', onAdminSessionExpired?
   if (!emulator && import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY) {
     initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
   }
-  const auth = audience === 'admin' ? initializeAuth(app, { persistence: inMemoryPersistence }) : getAuth(app);
+  const auth = audience === 'admin' ? initializeAuth(app, { persistence: browserSessionPersistence }) : getAuth(app);
   const firestore = getFirestore(app);
   const functions = getFunctions(app, import.meta.env.VITE_FIREBASE_REGION || 'us-central1');
   if (emulator) {
