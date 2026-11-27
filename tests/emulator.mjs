@@ -42,7 +42,7 @@ async function checkAdminSession(staff, trader, uid) {
   assert.ok(access.sessionExpiresAt > access.serverTime);
   const expiredClaims = { ...claims, auth_time: Math.floor(Date.now() / 1000) - 1801 };
   const expired = { idToken: [header, Buffer.from(JSON.stringify(expiredClaims)).toString('base64url'), signature].join('.') };
-  for (const op of ['admin.access', 'admin.dashboard', 'admin.clients', 'admin.client.resolve', 'admin.client', 'admin.client.update']) {
+  for (const op of ['admin.access', 'admin.dashboard', 'admin.clients', 'admin.client.resolve', 'admin.client', 'admin.client.report', 'admin.client.update']) {
     await call(expired, op, { uid }, 401);
   }
   for (const [account, status] of [[staff, 200], [expired, 403], [trader, 403]]) {
@@ -105,6 +105,38 @@ async function checkInvitations(staff, trader, testClientUids) {
   assert.deepEqual((await call(bonusClient, 'access', currentCode)).wallet, { available: 200000, held: 0 });
 }
 
+async function checkClientReport(staff, trader, testClientUids) {
+  const email = 'report-' + randomUUID() + '@example.test';
+  const client = await identityCall('signUp', email);
+  const uid = client.localId;
+  testClientUids.push(uid);
+  const started = await call(client, 'access', { name: 'Report Test' });
+  const from = Date.UTC(2026, 0, 12), until = Date.UTC(2026, 0, 13);
+  const setup = db.batch();
+  setup.update(db.collection('wallets').doc(uid), { available: 123450, held: 25000 });
+  for (const [createdAt, outcome, pnl] of [[from - 1, 'win', 1000], [from, 'win', 35000], [from + 1, 'loss', -10000], [from + 1, 'refund', 0], [until, 'loss', -3000]]) {
+    setup.create(db.collection('trades').doc(), { uid, createdAt, outcome, pnl, status: 'settled' });
+  }
+  for (const [createdAt, kind, status, amount] of [[from, 'deposit', 'approved', 50000], [from + 1, 'withdrawal', 'approved', 15000], [from + 2, 'deposit', 'pending', 44000], [until, 'deposit', 'approved', 5000]]) {
+    setup.create(db.collection('funding').doc(), { uid, createdAt, kind, status, amount });
+  }
+  await setup.commit();
+
+  const { generatedAt, ...report } = await call(staff, 'admin.client.report', { uid, from, until });
+  assert.ok(Number.isSafeInteger(generatedAt));
+  assert.deepEqual(report, {
+    period: { from, until },
+    client: { uid, number: started.profile.clientNumber, name: 'Report Test', email, status: 'Active', vipLevel: 'VIP1', reputation: 100, currency: 'INR' },
+    available: 123450, held: 25000, deposits: 50000, withdrawals: 15000, netProfit: 25000, trades: 3, wins: 1, losses: 1,
+  });
+  const allActivity = await call(staff, 'admin.client.report', { uid });
+  assert.equal(allActivity.trades, 5);
+  assert.equal(allActivity.deposits, 55000);
+  await call(staff, 'admin.client.report', { uid, from: until, until }, 400);
+  await call(trader, 'admin.client.report', { uid }, 403);
+  await call(staff, 'admin.client.report', { uid: staff.localId }, 403);
+}
+
 async function main() {
   const trader = await identityCall('signUp', email);
   const staff = await identityCall('signInWithPassword', 'staff@example.test');
@@ -126,6 +158,7 @@ async function main() {
     assert.deepEqual((await call(trader, 'list', { list: 'ledger' })).rows, []);
     await checkAdminSession(staff, trader, uid);
     await checkInvitations(staff, trader, testClientUids);
+    await checkClientReport(staff, trader, testClientUids);
 
     const adminCreatedEmail = 'admin-created-' + randomUUID() + '@example.test';
     const adminCreated = await call(staff, 'admin.client.create', { name: 'Test Client', email: adminCreatedEmail, password });
@@ -268,8 +301,10 @@ async function main() {
     await call(otherStaff, 'admin.invite.refresh', { kind: 'funded', requestId: randomUUID() }, 403);
     await call(otherStaff, 'admin.client.resolve', { reference }, 403);
     await call(otherStaff, 'admin.client.resolve', { reference: uid }, 403);
+    await call(otherStaff, 'admin.client.report', { uid }, 403);
     assert.deepEqual((await call(otherStaff, 'admin.clients.activity', { uids: [uid] })).rows, []);
     await otherStaffRef.update({ allClients: true });
+    await call(otherStaff, 'admin.client.report', { uid }, 403);
     assert.equal(await unreadMarker(otherStaff), sent.id);
 
     const followup = await call(trader, 'message.send', { message: 'Follow-up', requestId: randomUUID() });

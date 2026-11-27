@@ -5,6 +5,7 @@ import { FieldPath, FieldValue, getFirestore, type DocumentData, type DocumentSn
 import { defineBoolean, defineString } from 'firebase-functions/params';
 import { HttpsError, onCall, type CallableRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import type { ClientReport, ClientReportPeriod } from './client-report';
 import { demoPrice, durations, findAsset, isGateAsset, profitForDuration, profitPercent } from './market';
 import { gateFeedVersion, gateTradePrice } from './gate-market';
 import { invitationCodeAlphabet, invitationCodeLength, legacyFundedCodePrefix, shortFundedCodePattern, shortFundedCodePrefix } from './invitation-codes';
@@ -848,6 +849,75 @@ async function clientView(user: Actor, data: Data) {
   return { profile: state, wallet: funds ?? null, activity };
 }
 
+function reportDate(value: unknown) {
+  if (value == null) return null;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || !Number.isFinite(new Date(value).getTime())) {
+    fail('invalid-argument', 'Choose valid report dates.');
+  }
+  return value;
+}
+
+function reportActivity(collection: string, uid: string, period: ClientReportPeriod) {
+  let query = own(collection, uid);
+  if (period.from !== null) query = query.where('createdAt', '>=', period.from);
+  if (period.until !== null) query = query.where('createdAt', '<', period.until);
+  return period.from !== null || period.until !== null ? query.orderBy('createdAt', 'desc') : query;
+}
+
+async function clientReport(user: Actor, data: Data): Promise<ClientReport> {
+  if (!user.staff.includes('admin') && !user.staff.includes('finance')) {
+    fail('permission-denied', 'You do not have access to client financial reports.');
+  }
+  const uid = identifier(data.uid);
+  const period = { from: reportDate(data.from), until: reportDate(data.until) };
+  if (period.from !== null && period.until !== null && period.from >= period.until) {
+    fail('invalid-argument', 'The end date must be on or after the start date.');
+  }
+
+  return db.runTransaction(async tx => {
+    const [client, staffAccount] = await Promise.all([tx.get(profile(uid)), tx.get(db.collection('staff').doc(uid))]);
+    const state = client.data();
+    checkScope(user, state);
+    if (staffAccount.get('active') === true) fail('permission-denied', 'This account does not have a client report.');
+
+    // Use the existing client activity indexes and read only the fields needed for the totals.
+    const [funds, trades, funding] = await Promise.all([
+      tx.get(wallet(uid)),
+      tx.get(reportActivity('trades', uid, period).select('status', 'outcome', 'pnl')),
+      tx.get(reportActivity('funding', uid, period).where('status', '==', 'approved').select('kind', 'amount')),
+    ]);
+
+    let netProfit = 0, wins = 0, losses = 0;
+    for (const trade of trades.docs) {
+      if (trade.get('status') !== 'settled') continue;
+      netProfit += Number(trade.get('pnl') ?? 0);
+      if (trade.get('outcome') === 'win') wins++;
+      if (trade.get('outcome') === 'loss') losses++;
+    }
+    let deposits = 0, withdrawals = 0;
+    for (const request of funding.docs) {
+      if (request.get('kind') === 'deposit') deposits += Number(request.get('amount') ?? 0);
+      if (request.get('kind') === 'withdrawal') withdrawals += Number(request.get('amount') ?? 0);
+    }
+    const available = Number(funds.get('available') ?? 0);
+    const held = Number(funds.get('held') ?? 0);
+    const freeze = walletFreeze(available, state ?? {});
+    const status = freeze.kind === 'account' ? 'Frozen'
+      : freeze.kind !== 'none' || state?.tradeEnabled === false || state?.withdrawalEnabled === false ? 'Restricted' : 'Active';
+
+    return {
+      generatedAt: Date.now(), period,
+      client: {
+        uid, number: isClientNumber(state?.clientNumber) ? state.clientNumber : null,
+        name: String(state?.name || 'Client'), email: String(state?.email || ''), status,
+        vipLevel: String(state?.vipLevel || 'VIP1'), reputation: Number(state?.reputationScore ?? 100),
+        currency: String(state?.currency || 'INR'),
+      },
+      available, held, netProfit, deposits, withdrawals, trades: trades.size, wins, losses,
+    };
+  }, { readOnly: true });
+}
+
 async function assignClientNumbers(user: Actor, uids: string[]) {
   if (!uids.length) return new Map<string, number>();
   return db.runTransaction(async tx => {
@@ -1330,6 +1400,7 @@ export const workspace = onCall({ region, enforceAppCheck: local ? false : requi
     }
     case 'admin.client.resolve': return resolveClientRoute(user, data);
     case 'admin.client': return clientView(user, data);
+    case 'admin.client.report': return clientReport(user, data);
     case 'admin.messages': return supportThread(user, data);
     case 'admin.messages.read': return readSupportMessage(user, data);
     case 'admin.client.create': return adminClientCreate(user, data);

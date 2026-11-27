@@ -7,6 +7,7 @@ import { createUserWithEmailAndPassword, getMultiFactorResolver, multiFactor, on
   signInWithEmailAndPassword, signOut, TotpMultiFactorGenerator, type MultiFactorError, type MultiFactorResolver, type TotpSecret, type User } from 'firebase/auth';
 import { assets, demoPrice, findAsset, isGateAsset, profitForDuration, type Asset } from '../../../functions/src/market';
 import { gateTicker } from '../../../functions/src/gate-market';
+import type { ClientReport } from '../../../functions/src/client-report';
 import { legacyFundedCodePattern, shortFundedCodePattern } from '../../../functions/src/invitation-codes';
 import { walletFreeze } from '../../../functions/src/wallet-freeze';
 import { withdrawalReputationWarning } from '../../../functions/src/withdrawal-reputation';
@@ -16,6 +17,7 @@ import { tradeCoinIcon } from './coin-icons';
 import { finishStartup, showStartup } from './startup';
 import { adminClientPath, adminPath, adminRouteForPath, clientPaths, clientTabForPath, workspaceEntryPath } from './workspace-routes';
 import { depositSettingsChanges, depositSettingsForm } from './admin-deposit';
+import { openAdminClientReport } from './admin-client-report';
 import { adminActionIcons, adminLogoutIcon, adminNav, adminNavGroups, brand, chartFrames, ledgerRows, messages, messageThread, pair, title, userNav } from './screens';
 import { actionButton, amountField, credits, dateTime, errorMessage, esc, formStatus, label, pager, recordReference, section, showFormStatus, state, table, type DepositSettings, type Home, type Page, type Profile, type Row, type Wallet } from './view';
 import {
@@ -875,7 +877,7 @@ function buildClientDetailHtml(bundle: ClientBundle) {
   const uid = clientId(), { data, page } = bundle;
   return '<div id="client-detail-head">' + title(data.profile.name, data.profile.email) + '</div>' +
     '<div class="button-row admin-client-actions"><a class="button secondary compact" href="' + adminPath('clients') + '" data-nav="clients">Back to clients</a>' +
-    (role('admin') ? actionButton('restrictions', uid, 'Restrictions') : '') +
+    (role('admin') || role('finance') ? actionButton('client-report', uid, 'Download report') : '') +
     (role('finance') ? actionButton('adjustment', uid, 'Adjust credits') : '') + '</div>' +
     '<div class="admin-client-summary" id="client-summary-panel">' + clientSummaryHtml(data) + '</div>' +
     '<section class="panel" id="client-activity-panel"><header class="panel-heading"><h2>' + (clientSection() === 'messages' ? 'Support chat' : 'Client activity') + '</h2></header>' +
@@ -1641,15 +1643,12 @@ async function openDepositSettings(uid: string) {
   }
 }
 
-function clientAction(action: string, id: string) {
+function adjustClientBalance(id: string) {
   const target = visibleRows.get('@client');
   if (!target || target.id !== id) return;
-  const restrict = action === 'restrictions';
-  dialog(restrict ? 'Client restrictions' : 'Adjust client balance',
-    '<form class="stack" data-form="' + (restrict ? 'admin.client.restrict' : 'admin.client.adjust') + '"><input type="hidden" name="uid" value="' + esc(id) + '">' +
-    (restrict ? '<label class="check-row"><input type="checkbox" name="tradeEnabled" ' + (target.tradeEnabled ? 'checked' : '') +
-      '>Allow new trades</label><label class="check-row"><input type="checkbox" name="withdrawalEnabled" ' + (target.withdrawalEnabled ? 'checked' : '') +
-      '>Allow new withdrawals</label>' : amountField('10', 'amount', true)) +
+  dialog('Adjust client balance',
+    '<form class="stack" data-form="admin.client.adjust"><input type="hidden" name="uid" value="' + esc(id) + '">' +
+    amountField('10', 'amount', true) +
     '<label>Reason<input name="reason" minlength="3" maxlength="240" required></label><button class="button">Save change</button>' + formStatus() + '</form>');
 }
 async function enroll() {
@@ -2081,7 +2080,16 @@ root.addEventListener('click', async event => {
         break;
       case 'next': { const current = list(); if (current.next) { current.cursors[current.page + 1] = current.next; current.page++; await render(); } break; }
       case 'previous': if (list().page > 0) { list().page--; await render(); } break;
-      case 'restrictions': case 'adjustment': clientAction(action, id); break;
+      case 'client-report': {
+        if (!admin || route !== 'client' || id !== clientId() || (!role('admin') && !role('finance'))) break;
+        const session = authVersion;
+        openAdminClientReport(
+          period => api.call<ClientReport>('admin.client.report', { uid: id, ...period }),
+          () => access && authVersion === session,
+        );
+        break;
+      }
+      case 'adjustment': adjustClientBalance(id); break;
       case 'trade-detail': case 'funding-detail': case 'review-funding': { const row = visibleRows.get(id); if (row) details(action, row); break; }
       case 'copy-bank-details': {
         const text = target.dataset.copy || '';
@@ -2648,7 +2656,6 @@ root.addEventListener('submit', async event => {
       if (!String(values.password || '').trim()) delete params.password;
       if (!String(values.withdrawalPin || '').trim()) delete params.withdrawalPin;
     }
-    if (op === 'admin.client.restrict') { params.tradeEnabled = values.tradeEnabled === 'on'; params.withdrawalEnabled = values.withdrawalEnabled === 'on'; }
     if (op === 'admin.client.update' || op === 'admin.client.create') {
       params.tradeEnabled = values.tradeEnabled === 'on';
       params.withdrawalEnabled = values.withdrawalEnabled === 'on';
